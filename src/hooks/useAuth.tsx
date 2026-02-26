@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react';
 import { supabase } from '@/lib/supabase';
-import type { User, Session } from '@supabase/supabase-js';
+import type { User } from '@supabase/supabase-js';
 
 interface AuthUser {
   id: string;
@@ -14,7 +14,8 @@ interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
   signInAnonymously: () => Promise<void>;
-  signInWithGoogle: () => Promise<void>;
+  signInWithEmail: (email: string, password: string) => Promise<void>;
+  signUpWithEmail: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   setUsername: (username: string) => Promise<void>;
 }
@@ -23,7 +24,8 @@ const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   signInAnonymously: async () => {},
-  signInWithGoogle: async () => {},
+  signInWithEmail: async () => {},
+  signUpWithEmail: async () => {},
   signOut: async () => {},
   setUsername: async () => {},
 });
@@ -87,13 +89,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw error;
   }, []);
 
-  const signInWithGoogle = useCallback(async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: window.location.origin + '/lobby',
-      },
-    });
+  const signInWithEmail = useCallback(async (email: string, password: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+  }, []);
+
+  const signUpWithEmail = useCallback(async (email: string, password: string) => {
+    const { error } = await supabase.auth.signUp({ email, password });
     if (error) throw error;
   }, []);
 
@@ -121,7 +123,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         loading,
         signInAnonymously,
-        signInWithGoogle,
+        signInWithEmail,
+        signUpWithEmail,
         signOut: handleSignOut,
         setUsername: handleSetUsername,
       }}

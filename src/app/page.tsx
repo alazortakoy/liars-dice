@@ -11,11 +11,18 @@ import { useAuth } from '@/hooks/useAuth';
 export default function LoginPage() {
   const router = useRouter();
   const { showToast } = useToast();
-  const { user, loading: authLoading, signInAnonymously, signInWithGoogle, setUsername: saveUsername } = useAuth();
+  const { user, loading: authLoading, signInAnonymously, signInWithEmail, signUpWithEmail, setUsername: saveUsername } = useAuth();
   const [guestLoading, setGuestLoading] = useState(false);
   const [showUsernameModal, setShowUsernameModal] = useState(false);
   const [username, setUsername] = useState('');
   const [usernameLoading, setUsernameLoading] = useState(false);
+
+  // Email login state
+  const [showEmailForm, setShowEmailForm] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [emailLoading, setEmailLoading] = useState(false);
 
   // Zaten giriş yapmış ve username'i varsa lobby'ye yönlendir
   useEffect(() => {
@@ -32,7 +39,6 @@ export default function LoginPage() {
     setGuestLoading(true);
     try {
       await signInAnonymously();
-      // onAuthStateChange username'i kontrol edecek → modal açılacak
     } catch {
       showToast('Login failed. Please try again.');
     } finally {
@@ -40,12 +46,36 @@ export default function LoginPage() {
     }
   }
 
-  async function handleGoogleLogin() {
+  async function handleEmailSubmit() {
+    if (!email || !password) {
+      showToast('Please enter email and password.');
+      return;
+    }
+    if (password.length < 6) {
+      showToast('Password must be at least 6 characters.');
+      return;
+    }
+
+    setEmailLoading(true);
     try {
-      await signInWithGoogle();
-      // Google OAuth yönlendirmesi yapılacak
-    } catch {
-      showToast('Google login failed. Please try again.');
+      if (isSignUp) {
+        await signUpWithEmail(email, password);
+        showToast('Account created! You can now log in.');
+        setIsSignUp(false);
+      } else {
+        await signInWithEmail(email, password);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      if (msg.includes('Invalid login')) {
+        showToast('Invalid email or password.');
+      } else if (msg.includes('already registered')) {
+        showToast('Email already registered. Try logging in.');
+      } else {
+        showToast(msg);
+      }
+    } finally {
+      setEmailLoading(false);
     }
   }
 
@@ -73,7 +103,6 @@ export default function LoginPage() {
     }
   }
 
-  // Auth yüklenirken spinner göster
   if (authLoading) {
     return (
       <main className="min-h-dvh flex items-center justify-center">
@@ -94,8 +123,8 @@ export default function LoginPage() {
           &ldquo;Dead Man&apos;s Chest&rdquo;
         </p>
 
-        {/* Login butonları */}
         <div className="flex flex-col gap-4">
+          {/* Guest giriş */}
           <Button
             fullWidth
             onClick={handleGuestLogin}
@@ -110,19 +139,42 @@ export default function LoginPage() {
             <span className="flex-1 h-px bg-border-pirate" />
           </div>
 
-          <Button
-            variant="secondary"
-            fullWidth
-            onClick={handleGoogleLogin}
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24">
-              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" />
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
-            </svg>
-            Sign in with Google
-          </Button>
+          {/* Email login/signup */}
+          {!showEmailForm ? (
+            <Button
+              variant="secondary"
+              fullWidth
+              onClick={() => setShowEmailForm(true)}
+            >
+              ✉️ Sign in with Email
+            </Button>
+          ) : (
+            <div className="flex flex-col gap-3 animate-fade-in">
+              <Input
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoFocus
+              />
+              <Input
+                type="password"
+                placeholder="Password (min 6 chars)"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleEmailSubmit()}
+              />
+              <Button fullWidth onClick={handleEmailSubmit} loading={emailLoading}>
+                {isSignUp ? 'Create Account' : 'Log In'}
+              </Button>
+              <button
+                onClick={() => setIsSignUp(!isSignUp)}
+                className="text-text-muted text-xs hover:text-gold transition-colors"
+              >
+                {isSignUp ? 'Already have an account? Log in' : "Don't have an account? Sign up"}
+              </button>
+            </div>
+          )}
         </div>
 
         <p className="text-text-muted text-xs mt-8">

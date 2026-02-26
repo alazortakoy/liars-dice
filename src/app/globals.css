@@ -1,0 +1,89 @@
+@import "tailwindcss";
+
+/* Korsan Teması — Custom Theme */
+@theme inline {
+  /* Ana renkler */
+  --color-pirate-bg: #0a0e17;
+  --color-pirate-bg-medium: #131a2b;
+  --color-pirate-bg-light: #1a2332;
+  --color-pirate-card: #1e2a3a;
+
+  /* Altın tonları */
+  --color-gold: #d4a017;
+  --color-gold-light: #f0c040;
+  --color-gold-dark: #a07810;
+
+  /* Aksan renkleri */
+  --color-pirate-red: #c0392b;
+  --color-pirate-red-light: #e74c3c;
+  --color-pirate-green: #27ae60;
+  --color-pirate-green-light: #2ecc71;
+  --color-pirate-blue: #2980b9;
+
+  /* Metin renkleri */
+  --color-text-primary: #e8dcc8;
+  --color-text-secondary: #a89880;
+  --color-text-muted: #6b5e50;
+  --color-text-bright: #fff5e6;
+
+  /* Kenarlık */
+  --color-border-pirate: #2a3a4a;
+  --color-border-gold: rgba(212, 160, 23, 0.3);
+
+  /* Font */
+  --font-display: 'Georgia', 'Times New Roman', serif;
+}
+
+/* Global stiller */
+body {
+  background-color: var(--color-pirate-bg);
+  color: var(--color-text-primary);
+  font-family: system-ui, -apple-system, sans-serif;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--color-pirate-bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-pirate);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Seçim rengi */
+::selection {
+  background: var(--color-gold-dark);
+  color: var(--color-text-bright);
+}
+
+/* Ekran geçiş animasyonu */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 250ms ease;
+}
+
+.animate-slide-up {
+  animation: slideUp 250ms ease;
+}

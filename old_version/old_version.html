@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Liar's Dice - Yalancı Zarı</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <!-- Ana Menü Ekranı -->
+    <div id="menu-screen" class="screen active">
+        <div class="menu-container">
+            <h1 class="game-title">🎲 Liar's Dice</h1>
+            <h2 class="game-subtitle">Yalancı Zarı</h2>
+            <p class="game-tagline">"Dead Man's Chest"</p>
+            
+            <div class="menu-options">
+                <div class="option-group">
+                    <label for="player-count">Oyuncu Sayısı:</label>
+                    <select id="player-count">
+                        <option value="2">2 Oyuncu</option>
+                        <option value="3">3 Oyuncu</option>
+                        <option value="4" selected>4 Oyuncu</option>
+                        <option value="5">5 Oyuncu</option>
+                        <option value="6">6 Oyuncu</option>
+                    </select>
+                </div>
+                
+                <div id="player-names" class="player-names">
+                    <!-- Dinamik olarak doldurulacak -->
+                </div>
+                
+                <div class="option-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="joker-rule" checked>
+                        <span>1'ler Joker (Her değere dahil)</span>
+                    </label>
+                </div>
+                
+                <button id="start-game-btn" class="btn btn-primary">⚓ Oyunu Başlat</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Oyun Ekranı -->
+    <div id="game-screen" class="screen">
+        <div class="game-container">
+            <!-- Oyun Bilgi Paneli -->
+            <div class="game-info">
+                <div>
+                    <span>Tur:</span>
+                    <strong id="round-number">1</strong>
+                </div>
+                <div>
+                    <span>Son Teklif:</span>
+                    <strong id="last-bid">-</strong>
+                </div>
+                <div>
+                    <span>Sıra:</span>
+                    <strong id="active-player-name">-</strong>
+                </div>
+            </div>
+
+            <!-- Ana İçerik Wrapper -->
+            <div class="game-content">
+                <!-- Masa Alanı -->
+                <div id="game-table" class="game-table">
+                    <!-- Oyuncu alanları dinamik olarak eklenir -->
+                </div>
+
+                <!-- Sağ Panel -->
+                <div class="right-panel">
+                    <!-- Teklif Paneli -->
+                    <div id="bid-panel" class="bid-panel">
+                        <h3>🎯 Teklif Yap</h3>
+                        <div class="bid-controls">
+                            <div class="bid-input">
+                                <label>Miktar:</label>
+                                <div class="quantity-selector">
+                                    <button class="btn-small" id="qty-decrease">−</button>
+                                    <span id="bid-quantity">1</span>
+                                    <button class="btn-small" id="qty-increase">+</button>
+                            </div>
+                        </div>
+                        <div class="bid-input">
+                            <label>Zar Değeri:</label>
+                            <div class="dice-selector" id="dice-selector">
+                                <button class="dice-btn" data-value="1">1</button>
+                                <button class="dice-btn" data-value="2">2</button>
+                                <button class="dice-btn" data-value="3">3</button>
+                                <button class="dice-btn" data-value="4">4</button>
+                                <button class="dice-btn" data-value="5">5</button>
+                                <button class="dice-btn selected" data-value="6">6</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bid-actions">
+                        <button id="make-bid-btn" class="btn btn-primary">✓ Teklif Yap</button>
+                        <button id="call-liar-btn" class="btn btn-danger" disabled>🏴‍☠️ LIAR!</button>
+                    </div>
+                </div>
+
+                    <!-- Oyun Logu -->
+                    <div class="game-log">
+                        <h4>📜 Oyun Logu</h4>
+                        <ul id="log-list"></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sonuç Ekranı -->
+    <div id="result-screen" class="screen">
+        <div class="result-container">
+            <h2 id="result-title">🔍 Meydan Okuma Sonucu</h2>
+            <div id="revealed-dice" class="revealed-dice"></div>
+            <div id="result-message" class="result-message"></div>
+            <button id="continue-btn" class="btn btn-primary">Devam Et →</button>
+        </div>
+    </div>
+
+    <!-- Oyun Sonu Ekranı -->
+    <div id="gameover-screen" class="screen">
+        <div class="gameover-container">
+            <h1>🏆 Oyun Bitti!</h1>
+            <h2 id="winner-name">Kazanan</h2>
+            <div class="gameover-actions">
+                <button id="play-again-btn" class="btn btn-primary">🔄 Tekrar Oyna</button>
+                <button id="main-menu-btn" class="btn btn-secondary">🏠 Ana Menü</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Modülleri -->
+    <script src="js/constants.js"></script>
+    <script src="js/dice.js"></script>
+    <script src="js/player.js"></script>
+    <script src="js/bid.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/game.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

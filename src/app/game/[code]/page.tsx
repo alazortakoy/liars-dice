@@ -1,18 +1,18 @@
 'use client';
 
 import { useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
-import Badge from '@/components/ui/Badge';
 import Dice from '@/components/ui/Dice';
 import { useToast } from '@/components/ui/Toast';
+import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { rollDice } from '@/lib/game-logic';
 
 export default function GamePage() {
   const params = useParams();
-  const router = useRouter();
   const { showToast } = useToast();
+  const { user, isReady: authReady } = useRequireAuth();
   const roomCode = (params.code as string)?.toUpperCase() || '';
 
   // Demo state — TODO: Faz 5'te Realtime ile senkronize edilecek
@@ -21,7 +21,7 @@ export default function GamePage() {
   const [selectedDiceValue, setSelectedDiceValue] = useState(6);
   const [chatOpen, setChatOpen] = useState(false);
 
-  const username = typeof window !== 'undefined' ? localStorage.getItem('liars-dice-username') || 'You' : 'You';
+  const username = user?.username || 'You';
 
   // Mock rakipler
   const opponents = [
@@ -36,6 +36,14 @@ export default function GamePage() {
 
   function handleCallLiar() {
     showToast('LIAR! — Coming soon!');
+  }
+
+  if (!authReady) {
+    return (
+      <main className="min-h-dvh flex items-center justify-center">
+        <div className="w-8 h-8 border-3 border-border-pirate border-t-gold rounded-full animate-spin" />
+      </main>
+    );
   }
 
   return (

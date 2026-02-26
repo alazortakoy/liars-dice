@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
-import { ToastProvider } from '@/components/ui/Toast';
+import { Providers } from './providers';
 
 export const metadata: Metadata = {
   title: "Liar's Dice — Online Multiplayer",
@@ -20,9 +20,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased">
-        <ToastProvider>
+        <Providers>
           {children}
-        </ToastProvider>
+        </Providers>
       </body>
     </html>
   );

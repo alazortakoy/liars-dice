@@ -1,34 +1,52 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Modal from '@/components/ui/Modal';
 import { useToast } from '@/components/ui/Toast';
+import { useAuth } from '@/hooks/useAuth';
 
 export default function LoginPage() {
   const router = useRouter();
   const { showToast } = useToast();
-  const [loading, setLoading] = useState(false);
+  const { user, loading: authLoading, signInAnonymously, signInWithGoogle, setUsername: saveUsername } = useAuth();
+  const [guestLoading, setGuestLoading] = useState(false);
   const [showUsernameModal, setShowUsernameModal] = useState(false);
   const [username, setUsername] = useState('');
+  const [usernameLoading, setUsernameLoading] = useState(false);
+
+  // Zaten giriş yapmış ve username'i varsa lobby'ye yönlendir
+  useEffect(() => {
+    if (!authLoading && user?.username) {
+      router.push('/lobby');
+    }
+    // Giriş yapmış ama username'i yoksa modal aç
+    if (!authLoading && user && !user.username) {
+      setShowUsernameModal(true);
+    }
+  }, [user, authLoading, router]);
 
   async function handleGuestLogin() {
-    setLoading(true);
+    setGuestLoading(true);
     try {
-      // TODO: Faz 2'de Supabase anonim giriş
-      setShowUsernameModal(true);
+      await signInAnonymously();
+      // onAuthStateChange username'i kontrol edecek → modal açılacak
     } catch {
       showToast('Login failed. Please try again.');
     } finally {
-      setLoading(false);
+      setGuestLoading(false);
     }
   }
 
   async function handleGoogleLogin() {
-    // TODO: Faz 2'de Supabase Google OAuth
-    showToast('Google login coming soon!');
+    try {
+      await signInWithGoogle();
+      // Google OAuth yönlendirmesi yapılacak
+    } catch {
+      showToast('Google login failed. Please try again.');
+    }
   }
 
   async function handleUsernameSubmit() {
@@ -38,10 +56,30 @@ export default function LoginPage() {
       return;
     }
 
-    // TODO: Faz 2'de Supabase profiles tablosuna kaydet
-    localStorage.setItem('liars-dice-username', trimmed);
-    setShowUsernameModal(false);
-    router.push('/lobby');
+    setUsernameLoading(true);
+    try {
+      await saveUsername(trimmed);
+      setShowUsernameModal(false);
+      router.push('/lobby');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('23505') || msg.includes('unique')) {
+        showToast('Username already taken. Try another.');
+      } else {
+        showToast('Failed to set username. Try again.');
+      }
+    } finally {
+      setUsernameLoading(false);
+    }
+  }
+
+  // Auth yüklenirken spinner göster
+  if (authLoading) {
+    return (
+      <main className="min-h-dvh flex items-center justify-center">
+        <div className="w-8 h-8 border-3 border-border-pirate border-t-gold rounded-full animate-spin" />
+      </main>
+    );
   }
 
   return (
@@ -61,7 +99,7 @@ export default function LoginPage() {
           <Button
             fullWidth
             onClick={handleGuestLogin}
-            loading={loading}
+            loading={guestLoading}
           >
             ⚓ Play as Guest
           </Button>
@@ -106,7 +144,7 @@ export default function LoginPage() {
           autoFocus
         />
         <p className="text-text-muted text-xs mt-2 mb-4">2-20 characters</p>
-        <Button fullWidth onClick={handleUsernameSubmit}>
+        <Button fullWidth onClick={handleUsernameSubmit} loading={usernameLoading}>
           Set Sail! ⛵
         </Button>
       </Modal>

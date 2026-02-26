@@ -6,18 +6,20 @@ import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import { useToast } from '@/components/ui/Toast';
+import { useRequireAuth } from '@/hooks/useRequireAuth';
 
 export default function RoomPage() {
   const params = useParams();
   const router = useRouter();
   const { showToast } = useToast();
+  const { user, isReady: authReady } = useRequireAuth();
   const roomCode = (params.code as string)?.toUpperCase() || '------';
 
   const [isReady, setIsReady] = useState(false);
 
   // TODO: Faz 4'te gerçek oyuncu verileri Realtime'dan gelecek
   const mockPlayers = [
-    { id: '1', username: localStorage.getItem('liars-dice-username') || 'You', isReady: isReady, isHost: true },
+    { id: user?.id || '1', username: user?.username || 'You', isReady: isReady, isHost: true },
   ];
 
   function handleToggleReady() {
@@ -42,6 +44,14 @@ export default function RoomPage() {
   const allReady = mockPlayers.every((p) => p.isReady);
   const isHost = true; // TODO: Gerçek host kontrolü
 
+  if (!authReady) {
+    return (
+      <main className="min-h-dvh flex items-center justify-center">
+        <div className="w-8 h-8 border-3 border-border-pirate border-t-gold rounded-full animate-spin" />
+      </main>
+    );
+  }
+
   return (
     <main className="min-h-dvh flex flex-col items-center justify-center p-4">
       <div className="w-full max-w-[500px] animate-fade-in">
@@ -50,8 +60,6 @@ export default function RoomPage() {
           <h2 className="font-[family-name:var(--font-display)] text-2xl text-gold-light mb-3">
             Waiting Room
           </h2>
-
-          {/* Oda kodu */}
           <button
             onClick={handleCopyCode}
             className="inline-flex items-center gap-2 bg-pirate-bg-medium border border-dashed border-gold-dark rounded-[10px] px-5 py-2.5 text-2xl font-bold tracking-[4px] text-gold-light cursor-pointer hover:border-gold hover:shadow-[0_0_20px_rgba(212,160,23,0.15)] transition-all"
@@ -84,7 +92,6 @@ export default function RoomPage() {
             </Card>
           ))}
 
-          {/* Boş slotlar */}
           {Array.from({ length: 5 }).map((_, i) => (
             <div
               key={`empty-${i}`}

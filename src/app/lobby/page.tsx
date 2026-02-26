@@ -7,22 +7,21 @@ import Input from '@/components/ui/Input';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import { useToast } from '@/components/ui/Toast';
+import { useAuth } from '@/hooks/useAuth';
 import { APP_CONFIG } from '@/lib/config';
 
 export default function LobbyPage() {
   const router = useRouter();
   const { showToast } = useToast();
+  const { user, loading, signOut } = useAuth();
   const [joinCode, setJoinCode] = useState('');
-  const [username, setUsername] = useState('');
 
+  // Auth koruması: giriş yapmamış veya username'i yoksa login'e yönlendir
   useEffect(() => {
-    const stored = localStorage.getItem('liars-dice-username');
-    if (!stored) {
+    if (!loading && (!user || !user.username)) {
       router.push('/');
-      return;
     }
-    setUsername(stored);
-  }, [router]);
+  }, [user, loading, router]);
 
   function handleCreateRoom() {
     // TODO: Faz 3'te Supabase ile oda oluştur
@@ -35,13 +34,20 @@ export default function LobbyPage() {
       showToast(`Enter a ${APP_CONFIG.roomCodeLength}-character room code.`);
       return;
     }
-    // TODO: Faz 3'te Supabase ile odaya katıl
     router.push(`/room/${code}`);
   }
 
-  function handleLogout() {
-    localStorage.removeItem('liars-dice-username');
+  async function handleLogout() {
+    await signOut();
     router.push('/');
+  }
+
+  if (loading || !user?.username) {
+    return (
+      <main className="min-h-dvh flex items-center justify-center">
+        <div className="w-8 h-8 border-3 border-border-pirate border-t-gold rounded-full animate-spin" />
+      </main>
+    );
   }
 
   return (
@@ -53,20 +59,21 @@ export default function LobbyPage() {
             🏴‍☠️ Lobby
           </h2>
           <div className="flex items-center gap-3">
-            <span className="text-text-secondary text-sm">{username}</span>
+            <span className="text-text-secondary text-sm">{user.username}</span>
             <Button variant="ghost" size="sm" onClick={handleLogout}>
               Logout
             </Button>
           </div>
         </div>
 
-        {/* Oda oluştur + kodla katıl */}
+        {/* Oda oluştur */}
         <div className="flex flex-col sm:flex-row gap-3 mb-6">
           <Button fullWidth onClick={handleCreateRoom}>
             + Create Room
           </Button>
         </div>
 
+        {/* Kodla katıl */}
         <div className="flex gap-2 mb-6">
           <Input
             placeholder="Room code..."
@@ -93,7 +100,7 @@ export default function LobbyPage() {
             <p className="text-sm">Create a room or join with a code!</p>
           </div>
 
-          {/* Örnek oda kartı (görsel referans, sonra silinecek) */}
+          {/* Örnek oda kartı — Faz 3'te dinamik olacak */}
           <Card className="flex items-center justify-between cursor-pointer hover:border-gold-dark hover:shadow-[0_0_20px_rgba(212,160,23,0.15)] transition-all hidden">
             <div>
               <h4 className="text-text-primary font-medium">Captain&apos;s Table</h4>

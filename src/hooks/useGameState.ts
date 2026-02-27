@@ -40,6 +40,8 @@ interface UseGameStateReturn {
   roundResult: { loserId: string; reason: string } | null;
   turnTimeLeft: number | null; // saniye, null = timer yok
   rankings: PlayerRanking[];
+  roomId: string;
+  hostId: string;
   loading: boolean;
   makeBid: (quantity: number, value: number) => void;
   callLiar: () => void;
@@ -641,6 +643,8 @@ export function useGameState(
     roundResult,
     turnTimeLeft,
     rankings,
+    roomId: roomIdRef.current,
+    hostId: hostIdRef.current,
     loading,
     makeBid,
     callLiar,

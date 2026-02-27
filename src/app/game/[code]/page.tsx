@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
@@ -9,7 +9,9 @@ import Badge from '@/components/ui/Badge';
 import { useToast } from '@/components/ui/Toast';
 import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { useGameState } from '@/hooks/useGameState';
+import { useChat } from '@/hooks/useChat';
 import { isValidBid } from '@/lib/game-logic';
+import { APP_CONFIG } from '@/lib/config';
 
 export default function GamePage() {
   const params = useParams();
@@ -28,15 +30,68 @@ export default function GamePage() {
     roundResult,
     turnTimeLeft,
     rankings,
+    roomId,
+    isHost,
     loading,
     makeBid,
     callLiar,
   } = useGameState(roomCode, user?.id, user?.username || undefined);
 
+  // Chat hook
+  const {
+    messages: chatMessages,
+    unreadCount,
+    sendMessage: sendChatMsg,
+    sendSystemMsg,
+    clearUnread,
+  } = useChat(roomCode, roomId || null, user?.id, user?.username || undefined);
+
+  // Sistem mesajları: host oyun eventlerini chat'e yazar
+  const prevLogLenRef = useRef(0);
+  useEffect(() => {
+    if (!isHost || gameLog.length === 0) return;
+    // Sadece yeni eklenen log'ları chat'e gönder
+    const newCount = gameLog.length - prevLogLenRef.current;
+    if (newCount > 0 && prevLogLenRef.current > 0) {
+      // gameLog en yeni başta → ilk newCount entry yeni
+      const newEntries = gameLog.slice(0, newCount);
+      for (const entry of newEntries) {
+        if (['liar', 'round', 'elimination', 'system'].includes(entry.type)) {
+          sendSystemMsg(entry.message);
+        }
+      }
+    }
+    prevLogLenRef.current = gameLog.length;
+  }, [gameLog.length, isHost, sendSystemMsg, gameLog]);
+
   // Teklif paneli state
   const [bidQuantity, setBidQuantity] = useState(1);
   const [selectedDiceValue, setSelectedDiceValue] = useState(2);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Chat açıldığında unread sıfırla
+  function handleChatToggle() {
+    if (!chatOpen) {
+      clearUnread();
+    }
+    setChatOpen(!chatOpen);
+  }
+
+  // Chat mesajı gönder
+  function handleSendChat() {
+    if (!chatInput.trim()) return;
+    sendChatMsg(chatInput);
+    setChatInput('');
+  }
+
+  // Auto-scroll: yeni mesaj geldiğinde aşağı kay
+  useEffect(() => {
+    if (chatOpen) {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages.length, chatOpen]);
 
   // Rakipler (kendim hariç)
   const opponents = useMemo(() => {
@@ -437,10 +492,15 @@ export default function GamePage() {
 
         {/* Chat toggle */}
         <button
-          onClick={() => setChatOpen(!chatOpen)}
+          onClick={handleChatToggle}
           className="fixed bottom-4 right-4 w-12 h-12 bg-pirate-card border border-border-gold rounded-full flex items-center justify-center text-lg shadow-lg z-[100] hover:scale-105 transition-transform"
         >
           💬
+          {unreadCount > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-[20px] h-5 bg-pirate-red text-white text-[10px] font-bold rounded-full flex items-center justify-center px-1">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          )}
         </button>
 
         {/* Chat panel */}
@@ -451,16 +511,52 @@ export default function GamePage() {
               ✕
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto p-3 text-xs">
-            <p className="text-text-muted italic text-center py-8">Chat coming in Phase 7...</p>
+          <div className="flex-1 overflow-y-auto p-3 text-xs space-y-2">
+            {chatMessages.length === 0 ? (
+              <p className="text-text-muted italic text-center py-8">No messages yet...</p>
+            ) : (
+              chatMessages.map((msg) => {
+                if (msg.isSystem) {
+                  return (
+                    <div key={msg.id} className="text-center">
+                      <span className="text-gold-light italic text-[11px]">{msg.message}</span>
+                    </div>
+                  );
+                }
+                const isMe = msg.playerId === user?.id;
+                return (
+                  <div key={msg.id} className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                    <span className="text-text-muted text-[10px] mb-0.5">{msg.username}</span>
+                    <div className={`max-w-[80%] px-3 py-1.5 rounded-lg ${
+                      isMe
+                        ? 'bg-gold/20 border border-border-gold text-text-bright'
+                        : 'bg-pirate-bg-medium border border-border-pirate text-text-primary'
+                    }`}>
+                      <p className="text-xs break-words">{msg.message}</p>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+            <div ref={chatEndRef} />
           </div>
           <div className="flex gap-2 p-2 border-t border-border-pirate">
             <input
               className="flex-1 px-3 py-2 bg-pirate-bg-medium border border-border-pirate rounded-md text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-gold"
               placeholder="Type a message..."
-              disabled
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              maxLength={APP_CONFIG.maxChatMessageLength}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendChat();
+                }
+              }}
             />
-            <Button size="sm" disabled>Send</Button>
+            <Button size="sm" onClick={handleSendChat} disabled={!chatInput.trim()}>
+              Send
+            </Button>
           </div>
         </div>
       </div>

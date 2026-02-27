@@ -78,4 +78,5 @@ export type RealtimeEvent =
   | { type: 'game:end'; payload: { winnerId: string } }
   | { type: 'player:eliminated'; payload: { playerId: string } }
   | { type: 'player:disconnected'; payload: { playerId: string } }
-  | { type: 'turn:timeout'; payload: { playerId: string } };
+  | { type: 'turn:timeout'; payload: { playerId: string } }
+  | { type: 'chat:message'; payload: ChatMessage };

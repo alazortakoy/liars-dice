@@ -197,10 +197,61 @@ export async function leaveRoom(roomId: string, playerId: string, hostId: string
 
   if (error) throw error;
 
-  // Host ayrılıyorsa odayı sil
+  // Host ayrılıyorsa: başka oyuncu varsa devret, yoksa odayı sil
   if (playerId === hostId) {
-    await supabase.from('rooms').delete().eq('id', roomId);
+    const { data: remaining } = await supabase
+      .from('room_players')
+      .select('player_id')
+      .eq('room_id', roomId)
+      .order('joined_at', { ascending: true })
+      .limit(1);
+
+    if (remaining && remaining.length > 0) {
+      // Host'u sıradaki oyuncuya devret
+      await supabase
+        .from('rooms')
+        .update({ host_id: remaining[0].player_id })
+        .eq('id', roomId);
+    } else {
+      // Kimse kalmadı, odayı sil
+      await supabase.from('rooms').delete().eq('id', roomId);
+    }
   }
+}
+
+// Oyunu başlat (host only) — room status'u 'playing' yap
+export async function startGame(roomId: string, hostId: string): Promise<void> {
+  // Sadece host başlatabilir
+  const { data: room } = await supabase
+    .from('rooms')
+    .select('host_id, status')
+    .eq('id', roomId)
+    .single();
+
+  if (!room || room.host_id !== hostId) {
+    throw new Error('Only the host can start the game');
+  }
+  if (room.status !== 'waiting') {
+    throw new Error('Game already started');
+  }
+
+  // Oyuncu sayısı kontrolü
+  const { count } = await supabase
+    .from('room_players')
+    .select('*', { count: 'exact', head: true })
+    .eq('room_id', roomId);
+
+  if ((count ?? 0) < APP_CONFIG.minPlayersPerRoom) {
+    throw new Error(`Need at least ${APP_CONFIG.minPlayersPerRoom} players`);
+  }
+
+  // Room status'u güncelle
+  const { error } = await supabase
+    .from('rooms')
+    .update({ status: 'playing' })
+    .eq('id', roomId);
+
+  if (error) throw error;
 }
 
 // Ready durumunu değiştir

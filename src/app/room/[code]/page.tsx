@@ -7,7 +7,7 @@ import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import { useToast } from '@/components/ui/Toast';
 import { useRequireAuth } from '@/hooks/useRequireAuth';
-import { fetchRoom, fetchRoomPlayers, leaveRoom, toggleReady, type RoomRow, type RoomPlayerRow } from '@/lib/room-service';
+import { fetchRoom, fetchRoomPlayers, leaveRoom, toggleReady, startGame, type RoomRow, type RoomPlayerRow } from '@/lib/room-service';
 import { supabase } from '@/lib/supabase';
 import type { RoomSettings } from '@/types';
 
@@ -66,8 +66,12 @@ export default function RoomPage() {
             showToast('Room was closed by the host');
             router.push('/lobby');
           } else if (payload.eventType === 'UPDATE') {
-            // Oda güncellendi
-            setRoom(payload.new as RoomRow);
+            const updated = payload.new as RoomRow;
+            setRoom(updated);
+            // Oyun başladıysa tüm oyuncuları game sayfasına yönlendir
+            if (updated.status === 'playing') {
+              router.push(`/game/${roomCode}`);
+            }
           }
         }
       )
@@ -110,10 +114,15 @@ export default function RoomPage() {
   }
 
   // Oyunu başlat (sadece host)
-  function handleStartGame() {
-    if (!room) return;
-    // TODO: Faz 4'te game_state oluşturma + Realtime ile oyun başlatma
-    router.push(`/game/${roomCode}`);
+  async function handleStartGame() {
+    if (!room || !user) return;
+    try {
+      await startGame(room.id, user.id);
+      // Realtime UPDATE event ile tüm oyuncular yönlendirilecek
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to start game';
+      showToast(msg);
+    }
   }
 
   if (!authReady || roomLoading) {

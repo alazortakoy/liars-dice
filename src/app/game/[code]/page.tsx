@@ -1,50 +1,176 @@
 'use client';
 
-import { useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useState, useMemo } from 'react';
+import { useParams, useRouter } from 'next/navigation';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import Dice from '@/components/ui/Dice';
 import { useToast } from '@/components/ui/Toast';
 import { useRequireAuth } from '@/hooks/useRequireAuth';
-import { rollDice } from '@/lib/game-logic';
+import { useGameState } from '@/hooks/useGameState';
+import { isValidBid } from '@/lib/game-logic';
 
 export default function GamePage() {
   const params = useParams();
+  const router = useRouter();
   const { showToast } = useToast();
   const { user, isReady: authReady } = useRequireAuth();
   const roomCode = (params.code as string)?.toUpperCase() || '';
 
-  // Demo state — TODO: Faz 5'te Realtime ile senkronize edilecek
-  const [myDice] = useState(() => rollDice(5));
+  // Oyun state hook'u
+  const {
+    gameState,
+    myDice,
+    isMyTurn,
+    gameLog,
+    revealedDice,
+    roundResult,
+    loading,
+    makeBid,
+    callLiar,
+  } = useGameState(roomCode, user?.id, user?.username || undefined);
+
+  // Teklif paneli state
   const [bidQuantity, setBidQuantity] = useState(1);
-  const [selectedDiceValue, setSelectedDiceValue] = useState(6);
+  const [selectedDiceValue, setSelectedDiceValue] = useState(2);
   const [chatOpen, setChatOpen] = useState(false);
 
-  const username = user?.username || 'You';
+  // Rakipler (kendim hariç)
+  const opponents = useMemo(() => {
+    if (!gameState) return [];
+    return gameState.players.filter((p) => p.id !== user?.id);
+  }, [gameState, user?.id]);
 
-  // Mock rakipler
-  const opponents = [
-    { id: '2', username: 'BlackBeard', diceCount: 5, isEliminated: false, isActive: false },
-    { id: '3', username: 'DavyJones', diceCount: 4, isEliminated: false, isActive: false },
-    { id: '4', username: 'JackSparrow', diceCount: 0, isEliminated: true, isActive: false },
-  ];
+  // Toplam zar sayısı
+  const totalDice = useMemo(() => {
+    if (!gameState) return 0;
+    return gameState.players.reduce((sum, p) => sum + p.diceCount, 0);
+  }, [gameState]);
+
+  // Sırası olan oyuncunun adı
+  const currentTurnName = useMemo(() => {
+    if (!gameState) return '';
+    if (gameState.currentTurnPlayerId === user?.id) return 'You';
+    return gameState.players.find((p) => p.id === gameState.currentTurnPlayerId)?.username || '?';
+  }, [gameState, user?.id]);
+
+  // Son teklif bilgisi
+  const lastBidInfo = useMemo(() => {
+    if (!gameState?.lastBid) return null;
+    const bidder = gameState.players.find((p) => p.id === gameState.lastBid!.playerId);
+    return {
+      username: bidder?.username || '?',
+      quantity: gameState.lastBid.quantity,
+      value: gameState.lastBid.value,
+    };
+  }, [gameState]);
+
+  // Teklif geçerli mi?
+  const canMakeBid = useMemo(() => {
+    if (!isMyTurn || gameState?.status !== 'active') return false;
+    return isValidBid(
+      { playerId: user?.id || '', quantity: bidQuantity, value: selectedDiceValue },
+      gameState?.lastBid || null
+    );
+  }, [isMyTurn, gameState, bidQuantity, selectedDiceValue, user?.id]);
+
+  // LIAR diyebilir mi?
+  const canCallLiar = isMyTurn && gameState?.status === 'active' && !!gameState.lastBid;
+
+  // Kazanan bilgisi
+  const winner = useMemo(() => {
+    if (!gameState || gameState.status !== 'finished' || !gameState.winnerId) return null;
+    return gameState.players.find((p) => p.id === gameState.winnerId);
+  }, [gameState]);
+
+  // Reveal'da bir oyuncunun zarlarını bul
+  function getRevealedDiceFor(playerId: string): number[] | null {
+    if (!revealedDice) return null;
+    return revealedDice.find((r) => r.id === playerId)?.dice || null;
+  }
 
   function handleMakeBid() {
-    showToast(`Bid: ${bidQuantity}x ${selectedDiceValue}'s — Coming soon!`);
+    if (!canMakeBid) {
+      showToast('Invalid bid — quantity or value must increase');
+      return;
+    }
+    makeBid(bidQuantity, selectedDiceValue);
   }
 
   function handleCallLiar() {
-    showToast('LIAR! — Coming soon!');
+    if (!canCallLiar) return;
+    callLiar();
   }
 
-  if (!authReady) {
+  // Loading ekranı
+  if (!authReady || loading) {
     return (
-      <main className="min-h-dvh flex items-center justify-center">
+      <main className="min-h-dvh flex flex-col items-center justify-center gap-3">
         <div className="w-8 h-8 border-3 border-border-pirate border-t-gold rounded-full animate-spin" />
+        <p className="text-text-muted text-sm">
+          {!authReady ? 'Authenticating...' : 'Waiting for game to start...'}
+        </p>
       </main>
     );
   }
+
+  // Oyun state henüz yüklenmedi
+  if (!gameState) {
+    return (
+      <main className="min-h-dvh flex flex-col items-center justify-center gap-3">
+        <div className="w-8 h-8 border-3 border-border-pirate border-t-gold rounded-full animate-spin" />
+        <p className="text-text-muted text-sm">Loading game...</p>
+      </main>
+    );
+  }
+
+  // Oyun bitti ekranı
+  if (gameState.status === 'finished' && winner) {
+    return (
+      <main className="min-h-dvh flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-[500px] animate-fade-in text-center">
+          <Card gold className="py-8">
+            <h2 className="font-[family-name:var(--font-display)] text-3xl text-gold-light mb-2">
+              Game Over!
+            </h2>
+            <p className="text-2xl font-bold text-text-bright mb-1">
+              {winner.id === user?.id ? 'You Win!' : `${winner.username} Wins!`}
+            </p>
+            <p className="text-text-muted text-sm mb-6">
+              After {gameState.round} rounds of bluffing
+            </p>
+            <Button onClick={() => router.push('/lobby')}>
+              Back to Lobby
+            </Button>
+          </Card>
+
+          {/* Son oyun logu */}
+          <Card className="mt-4 max-h-[200px] overflow-y-auto">
+            <h4 className="text-text-muted text-xs uppercase tracking-wider mb-2">Game Log</h4>
+            <ul className="flex flex-col gap-1 text-xs text-text-secondary">
+              {gameLog.slice(0, 20).map((entry) => (
+                <li
+                  key={entry.id}
+                  className={`py-1 border-b border-border-pirate/50 ${
+                    entry.type === 'elimination' ? 'text-pirate-red-light' :
+                    entry.type === 'system' ? 'text-gold-light' : ''
+                  }`}
+                >
+                  {entry.message}
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </div>
+      </main>
+    );
+  }
+
+  // Ana oyun ekranı
+  const isRevealing = gameState.status === 'revealing' || revealedDice !== null;
+  const isRoundEnd = gameState.status === 'round_end' || roundResult !== null;
+  const myPlayer = gameState.players.find((p) => p.id === user?.id);
+  const amEliminated = myPlayer?.isEliminated ?? false;
 
   return (
     <main className="min-h-dvh flex flex-col items-center p-2 pt-2">
@@ -53,124 +179,193 @@ export default function GamePage() {
         <Card className="flex justify-between items-center py-2 px-3 text-xs">
           <div>
             <span className="text-text-muted">Round </span>
-            <strong className="text-gold-light">3</strong>
+            <strong className="text-gold-light">{gameState.round}</strong>
           </div>
           <div>
             <span className="text-text-muted">Last Bid: </span>
-            <strong className="text-gold-light">3x 5&apos;s</strong>
+            <strong className="text-gold-light">
+              {lastBidInfo ? `${lastBidInfo.quantity}x ${lastBidInfo.value}'s` : '—'}
+            </strong>
           </div>
           <div>
             <span className="text-text-muted">Turn: </span>
-            <strong className="text-gold-light">{username}</strong>
+            <strong className={`${isMyTurn ? 'text-pirate-green-light' : 'text-gold-light'}`}>
+              {currentTurnName}
+            </strong>
           </div>
           <div>
-            <span className="text-text-muted">Total Dice: </span>
-            <strong className="text-gold-light">14</strong>
+            <span className="text-text-muted">Dice: </span>
+            <strong className="text-gold-light">{totalDice}</strong>
           </div>
         </Card>
 
+        {/* Round sonucu */}
+        {roundResult && (
+          <div className="bg-pirate-red/20 border border-pirate-red rounded-[10px] p-3 text-center animate-fade-in">
+            <p className="text-pirate-red-light font-semibold text-sm">{roundResult.reason}</p>
+            <p className="text-text-muted text-xs mt-1">New round starting...</p>
+          </div>
+        )}
+
         {/* Rakipler */}
-        <div className="grid grid-cols-3 gap-2">
-          {opponents.map((opp) => (
-            <Card
-              key={opp.id}
-              className={`text-center py-2 px-2 ${opp.isEliminated ? 'opacity-40' : ''} ${opp.isActive ? 'border-gold shadow-[0_0_20px_rgba(212,160,23,0.15)]' : ''}`}
-            >
-              <p className="font-semibold text-text-primary text-sm truncate">{opp.username}</p>
-              <div className="flex justify-center gap-1 mt-1">
-                {Array.from({ length: opp.diceCount }).map((_, i) => (
-                  <Dice key={i} hidden small />
-                ))}
-                {opp.isEliminated && <span className="text-pirate-red-light text-xs">Eliminated</span>}
-              </div>
-            </Card>
-          ))}
+        <div className={`grid gap-2 ${opponents.length <= 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+          {opponents.map((opp) => {
+            const oppRevealed = getRevealedDiceFor(opp.id);
+            const isOppTurn = gameState.currentTurnPlayerId === opp.id;
+            const isLoser = roundResult?.loserId === opp.id;
+
+            return (
+              <Card
+                key={opp.id}
+                className={`text-center py-2 px-2 transition-all ${
+                  opp.isEliminated ? 'opacity-40' : ''
+                } ${isOppTurn ? 'border-gold shadow-[0_0_20px_rgba(212,160,23,0.15)]' : ''} ${
+                  isLoser ? 'border-pirate-red shadow-[0_0_20px_rgba(192,57,43,0.2)]' : ''
+                }`}
+              >
+                <p className="font-semibold text-text-primary text-sm truncate">{opp.username}</p>
+                <div className="flex justify-center gap-1 mt-1 flex-wrap">
+                  {opp.isEliminated ? (
+                    <span className="text-pirate-red-light text-xs">Eliminated</span>
+                  ) : oppRevealed ? (
+                    // Zarlar açık — gerçek değerleri göster
+                    oppRevealed.map((val, i) => (
+                      <Dice key={i} value={val} small />
+                    ))
+                  ) : (
+                    // Zarlar gizli
+                    Array.from({ length: opp.diceCount }).map((_, i) => (
+                      <Dice key={i} hidden small />
+                    ))
+                  )}
+                </div>
+              </Card>
+            );
+          })}
         </div>
 
         {/* Benim zarlarım */}
         <Card gold className="text-center">
-          <h4 className="text-text-muted text-xs mb-2 uppercase tracking-wider">Your Dice</h4>
+          <h4 className="text-text-muted text-xs mb-2 uppercase tracking-wider">
+            Your Dice {amEliminated && '(Eliminated)'}
+          </h4>
           <div className="flex justify-center gap-2">
-            {myDice.map((value, i) => (
-              <Dice key={i} value={value} />
-            ))}
+            {amEliminated ? (
+              <span className="text-pirate-red-light text-sm py-2">You have been eliminated</span>
+            ) : (
+              myDice.map((value, i) => (
+                <Dice key={i} value={value} />
+              ))
+            )}
           </div>
         </Card>
 
         {/* Son teklif */}
-        <div className="bg-pirate-bg-medium border border-border-pirate rounded-[10px] p-3 text-center">
-          <span className="text-text-muted text-sm">Last bid by </span>
-          <strong className="text-gold-light">BlackBeard</strong>
-          <span className="text-text-muted text-sm">: </span>
-          <strong className="text-text-bright text-lg">3x</strong>
-          <span className="text-text-muted text-sm"> of </span>
-          <strong className="text-text-bright text-lg">5&apos;s</strong>
-        </div>
+        {lastBidInfo && (
+          <div className="bg-pirate-bg-medium border border-border-pirate rounded-[10px] p-3 text-center">
+            <span className="text-text-muted text-sm">Last bid by </span>
+            <strong className="text-gold-light">{lastBidInfo.username}</strong>
+            <span className="text-text-muted text-sm">: </span>
+            <strong className="text-text-bright text-lg">{lastBidInfo.quantity}x</strong>
+            <span className="text-text-muted text-sm"> of </span>
+            <strong className="text-text-bright text-lg">{lastBidInfo.value}&apos;s</strong>
+          </div>
+        )}
 
-        {/* Teklif paneli */}
-        <Card>
-          <div className="flex flex-col gap-3">
-            {/* Miktar */}
-            <div className="flex items-center gap-3">
-              <span className="text-text-muted text-sm min-w-[60px]">Quantity:</span>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setBidQuantity(Math.max(1, bidQuantity - 1))}
-                >
-                  −
-                </Button>
-                <span className="text-2xl font-bold text-gold-light min-w-[40px] text-center">
-                  {bidQuantity}
-                </span>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setBidQuantity(bidQuantity + 1)}
-                >
-                  +
-                </Button>
+        {/* Teklif paneli — sadece sıra bendeyse ve oyun aktifse */}
+        {isMyTurn && gameState.status === 'active' && !amEliminated && (
+          <Card className="animate-slide-up">
+            <div className="flex flex-col gap-3">
+              {/* Miktar */}
+              <div className="flex items-center gap-3">
+                <span className="text-text-muted text-sm min-w-[60px]">Quantity:</span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setBidQuantity(Math.max(1, bidQuantity - 1))}
+                  >
+                    −
+                  </Button>
+                  <span className="text-2xl font-bold text-gold-light min-w-[40px] text-center">
+                    {bidQuantity}
+                  </span>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setBidQuantity(bidQuantity + 1)}
+                  >
+                    +
+                  </Button>
+                </div>
+              </div>
+
+              {/* Zar değeri */}
+              <div className="flex items-center gap-3">
+                <span className="text-text-muted text-sm min-w-[60px]">Value:</span>
+                <div className="flex gap-1.5">
+                  {[1, 2, 3, 4, 5, 6].map((val) => (
+                    <Dice
+                      key={val}
+                      value={val}
+                      selected={selectedDiceValue === val}
+                      onClick={() => setSelectedDiceValue(val)}
+                    />
+                  ))}
+                </div>
               </div>
             </div>
 
-            {/* Zar değeri */}
-            <div className="flex items-center gap-3">
-              <span className="text-text-muted text-sm min-w-[60px]">Value:</span>
-              <div className="flex gap-1.5">
-                {[1, 2, 3, 4, 5, 6].map((val) => (
-                  <Dice
-                    key={val}
-                    value={val}
-                    selected={selectedDiceValue === val}
-                    onClick={() => setSelectedDiceValue(val)}
-                  />
-                ))}
-              </div>
+            {/* Aksiyon butonları */}
+            <div className="flex gap-2 mt-4">
+              <Button fullWidth onClick={handleMakeBid} disabled={!canMakeBid}>
+                Make Bid
+              </Button>
+              {canCallLiar && (
+                <Button fullWidth variant="danger" onClick={handleCallLiar}>
+                  LIAR!
+                </Button>
+              )}
             </div>
-          </div>
+          </Card>
+        )}
 
-          {/* Aksiyon butonları */}
-          <div className="flex gap-2 mt-4">
-            <Button fullWidth onClick={handleMakeBid}>
-              ✓ Make Bid
-            </Button>
-            <Button fullWidth variant="danger" onClick={handleCallLiar}>
-              🏴‍☠️ LIAR!
-            </Button>
+        {/* Sıra başkasındaysa bekle mesajı */}
+        {!isMyTurn && gameState.status === 'active' && !amEliminated && (
+          <div className="text-center py-3 text-text-muted text-sm">
+            Waiting for <strong className="text-gold-light">{currentTurnName}</strong> to make a move...
           </div>
-        </Card>
+        )}
+
+        {/* Reveal durumu */}
+        {isRevealing && !roundResult && (
+          <div className="text-center py-3 text-gold-light text-sm animate-fade-in">
+            Revealing all dice...
+          </div>
+        )}
 
         {/* Oyun logu */}
         <Card className="max-h-[200px] overflow-y-auto">
           <h4 className="text-text-muted text-xs uppercase tracking-wider mb-2">Game Log</h4>
-          <ul className="flex flex-col gap-1 text-xs text-text-secondary">
-            <li className="py-1 border-b border-border-pirate/50">BlackBeard bid 3x 5&apos;s</li>
-            <li className="py-1 border-b border-border-pirate/50">DavyJones bid 2x 4&apos;s</li>
-            <li className="py-1 border-b border-border-pirate/50">Round 3 started — 14 dice on the table</li>
-            <li className="py-1 border-b border-border-pirate/50 text-pirate-red-light">JackSparrow eliminated! Lost last die.</li>
-            <li className="py-1">Round 2 — {username} called LIAR! JackSparrow had bluffed. JackSparrow loses a die.</li>
-          </ul>
+          {gameLog.length === 0 ? (
+            <p className="text-text-muted text-xs italic text-center py-2">Game starting...</p>
+          ) : (
+            <ul className="flex flex-col gap-1 text-xs text-text-secondary">
+              {gameLog.slice(0, 50).map((entry) => (
+                <li
+                  key={entry.id}
+                  className={`py-1 border-b border-border-pirate/50 ${
+                    entry.type === 'elimination' ? 'text-pirate-red-light' :
+                    entry.type === 'liar' ? 'text-pirate-red-light font-semibold' :
+                    entry.type === 'system' ? 'text-gold-light' :
+                    entry.type === 'round' ? 'text-pirate-blue' : ''
+                  }`}
+                >
+                  {entry.message}
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
 
         {/* Chat toggle */}

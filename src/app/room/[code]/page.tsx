@@ -1,12 +1,15 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import { useToast } from '@/components/ui/Toast';
 import { useRequireAuth } from '@/hooks/useRequireAuth';
+import { fetchRoom, fetchRoomPlayers, leaveRoom, toggleReady, type RoomRow, type RoomPlayerRow } from '@/lib/room-service';
+import { supabase } from '@/lib/supabase';
+import type { RoomSettings } from '@/types';
 
 export default function RoomPage() {
   const params = useParams();
@@ -15,42 +18,118 @@ export default function RoomPage() {
   const { user, isReady: authReady } = useRequireAuth();
   const roomCode = (params.code as string)?.toUpperCase() || '------';
 
-  const [isReady, setIsReady] = useState(false);
+  const [room, setRoom] = useState<RoomRow | null>(null);
+  const [players, setPlayers] = useState<RoomPlayerRow[]>([]);
+  const [roomLoading, setRoomLoading] = useState(true);
 
-  // TODO: Faz 4'te gerçek oyuncu verileri Realtime'dan gelecek
-  const mockPlayers = [
-    { id: user?.id || '1', username: user?.username || 'You', isReady: isReady, isHost: true },
-  ];
+  // Oda ve oyuncu verilerini yükle
+  const loadRoomData = useCallback(async () => {
+    const roomData = await fetchRoom(roomCode);
+    if (!roomData) {
+      showToast('Room not found');
+      router.push('/lobby');
+      return;
+    }
+    setRoom(roomData);
 
-  function handleToggleReady() {
-    setIsReady(!isReady);
+    const playersData = await fetchRoomPlayers(roomData.id);
+    setPlayers(playersData);
+    setRoomLoading(false);
+  }, [roomCode, router, showToast]);
+
+  useEffect(() => {
+    if (authReady) {
+      loadRoomData();
+    }
+  }, [authReady, loadRoomData]);
+
+  // Realtime: room_players değişikliklerini dinle
+  useEffect(() => {
+    if (!room) return;
+
+    const channel = supabase
+      .channel(`room-${room.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'room_players', filter: `room_id=eq.${room.id}` },
+        () => {
+          // Oyuncu listesini yenile
+          fetchRoomPlayers(room.id).then(setPlayers);
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'rooms', filter: `id=eq.${room.id}` },
+        (payload) => {
+          if (payload.eventType === 'DELETE') {
+            // Oda silindi (host ayrıldı)
+            showToast('Room was closed by the host');
+            router.push('/lobby');
+          } else if (payload.eventType === 'UPDATE') {
+            // Oda güncellendi
+            setRoom(payload.new as RoomRow);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [room, router, showToast]);
+
+  // Ready durumunu değiştir
+  async function handleToggleReady() {
+    if (!room || !user) return;
+    const myPlayer = players.find((p) => p.player_id === user.id);
+    if (!myPlayer) return;
+
+    try {
+      await toggleReady(room.id, user.id, !myPlayer.is_ready);
+    } catch {
+      showToast('Failed to update ready status');
+    }
   }
 
+  // Oda kodunu kopyala
   function handleCopyCode() {
     navigator.clipboard.writeText(roomCode).then(() => {
       showToast('Room code copied!');
     });
   }
 
-  function handleLeaveRoom() {
-    router.push('/lobby');
+  // Odadan ayrıl
+  async function handleLeaveRoom() {
+    if (!room || !user) return;
+    try {
+      await leaveRoom(room.id, user.id, room.host_id);
+      router.push('/lobby');
+    } catch {
+      showToast('Failed to leave room');
+    }
   }
 
+  // Oyunu başlat (sadece host)
   function handleStartGame() {
-    // TODO: Faz 4'te Realtime ile oyun başlatma
+    if (!room) return;
+    // TODO: Faz 4'te game_state oluşturma + Realtime ile oyun başlatma
     router.push(`/game/${roomCode}`);
   }
 
-  const allReady = mockPlayers.every((p) => p.isReady);
-  const isHost = true; // TODO: Gerçek host kontrolü
-
-  if (!authReady) {
+  if (!authReady || roomLoading) {
     return (
       <main className="min-h-dvh flex items-center justify-center">
         <div className="w-8 h-8 border-3 border-border-pirate border-t-gold rounded-full animate-spin" />
       </main>
     );
   }
+
+  const settings = (room?.settings || {}) as RoomSettings;
+  const isHost = room?.host_id === user?.id;
+  const myPlayer = players.find((p) => p.player_id === user?.id);
+  const isReady = myPlayer?.is_ready ?? false;
+  const allReady = players.length >= 2 && players.every((p) => p.is_ready);
+  const emptySlots = Math.max(0, (settings.maxPlayers || 6) - players.length);
 
   return (
     <main className="min-h-dvh flex flex-col items-center justify-center p-4">
@@ -72,27 +151,30 @@ export default function RoomPage() {
 
         {/* Oda ayarları */}
         <div className="flex flex-wrap gap-2 justify-center mb-6">
-          <Badge variant="gold">5 Dice</Badge>
-          <Badge variant="gold">Joker: ON</Badge>
-          <Badge variant="gold">30s Timer</Badge>
-          <Badge variant="gold">Max 6 Players</Badge>
+          <Badge variant="gold">{settings.startingDice || 5} Dice</Badge>
+          <Badge variant="gold">Joker: {settings.jokerRule ? 'ON' : 'OFF'}</Badge>
+          <Badge variant="gold">{settings.turnTimer === 0 ? 'No Timer' : `${settings.turnTimer || 30}s`}</Badge>
+          <Badge variant="gold">Max {settings.maxPlayers || 6} Players</Badge>
         </div>
 
         {/* Oyuncu listesi */}
         <div className="flex flex-col gap-2 mb-6">
-          {mockPlayers.map((player) => (
+          {players.map((player) => (
             <Card key={player.id} className="flex items-center justify-between">
               <div className="flex items-center gap-2 font-medium">
-                {player.isHost && <span className="text-xs">👑</span>}
+                {player.player_id === room?.host_id && <span className="text-xs">👑</span>}
                 <span>{player.username}</span>
+                {player.player_id === user?.id && (
+                  <span className="text-text-muted text-xs">(you)</span>
+                )}
               </div>
-              <Badge variant={player.isReady ? 'green' : 'red'}>
-                {player.isReady ? 'Ready' : 'Not Ready'}
+              <Badge variant={player.is_ready ? 'green' : 'red'}>
+                {player.is_ready ? 'Ready' : 'Not Ready'}
               </Badge>
             </Card>
           ))}
 
-          {Array.from({ length: 5 }).map((_, i) => (
+          {Array.from({ length: emptySlots }).map((_, i) => (
             <div
               key={`empty-${i}`}
               className="border border-dashed border-border-pirate rounded-[10px] p-3 text-center text-text-muted text-sm"
@@ -116,7 +198,7 @@ export default function RoomPage() {
             <Button
               fullWidth
               variant="primary"
-              disabled={!allReady || mockPlayers.length < 2}
+              disabled={!allReady}
               onClick={handleStartGame}
             >
               🏴‍☠️ Start Game

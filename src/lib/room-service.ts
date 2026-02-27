@@ -1,0 +1,215 @@
+import { supabase } from './supabase';
+import { generateRoomCode } from './game-logic';
+import type { RoomSettings } from '@/types';
+import { APP_CONFIG } from './config';
+
+// Supabase'den dönen oda tipi
+export interface RoomRow {
+  id: string;
+  code: string;
+  host_id: string;
+  settings: RoomSettings;
+  status: 'waiting' | 'playing' | 'finished';
+  created_at: string;
+}
+
+// Supabase'den dönen oyuncu tipi
+export interface RoomPlayerRow {
+  id: string;
+  room_id: string;
+  player_id: string;
+  username: string;
+  is_ready: boolean;
+  joined_at: string;
+}
+
+// Lobby'de gösterilecek oda bilgisi (oyuncu sayısı dahil)
+export interface RoomWithPlayerCount extends RoomRow {
+  player_count: number;
+  host_username: string;
+}
+
+// Benzersiz oda kodu üret (çakışma kontrolü)
+async function generateUniqueRoomCode(): Promise<string> {
+  for (let i = 0; i < 10; i++) {
+    const code = generateRoomCode(APP_CONFIG.roomCodeLength);
+    const { data } = await supabase
+      .from('rooms')
+      .select('id')
+      .eq('code', code)
+      .single();
+    if (!data) return code;
+  }
+  throw new Error('Failed to generate unique room code');
+}
+
+// Oda oluştur + host'u oyuncu olarak ekle
+export async function createRoom(
+  hostId: string,
+  username: string,
+  settings: RoomSettings
+): Promise<RoomRow> {
+  const code = await generateUniqueRoomCode();
+
+  // Oda oluştur
+  const { data: room, error: roomError } = await supabase
+    .from('rooms')
+    .insert({
+      code,
+      host_id: hostId,
+      settings,
+    })
+    .select()
+    .single();
+
+  if (roomError) throw roomError;
+
+  // Host'u oyuncu olarak ekle
+  const { error: playerError } = await supabase
+    .from('room_players')
+    .insert({
+      room_id: room.id,
+      player_id: hostId,
+      username,
+    });
+
+  if (playerError) {
+    // Oda oluşturuldu ama oyuncu eklenemedi — odayı sil
+    await supabase.from('rooms').delete().eq('id', room.id);
+    throw playerError;
+  }
+
+  return room as RoomRow;
+}
+
+// Odaya katıl
+export async function joinRoom(
+  code: string,
+  playerId: string,
+  username: string
+): Promise<RoomRow> {
+  // Odayı bul
+  const { data: room, error: roomError } = await supabase
+    .from('rooms')
+    .select('*')
+    .eq('code', code.toUpperCase())
+    .single();
+
+  if (roomError || !room) throw new Error('Room not found');
+
+  if (room.status !== 'waiting') {
+    throw new Error('Game already started');
+  }
+
+  // Mevcut oyuncu sayısını kontrol et
+  const { count } = await supabase
+    .from('room_players')
+    .select('*', { count: 'exact', head: true })
+    .eq('room_id', room.id);
+
+  const maxPlayers = (room.settings as RoomSettings).maxPlayers || APP_CONFIG.maxPlayersPerRoom;
+  if ((count ?? 0) >= maxPlayers) {
+    throw new Error('Room is full');
+  }
+
+  // Oyuncuyu ekle
+  const { error: joinError } = await supabase
+    .from('room_players')
+    .insert({
+      room_id: room.id,
+      player_id: playerId,
+      username,
+    });
+
+  if (joinError) {
+    // Zaten katılmışsa hata vermek yerine mevcut odaya yönlendir
+    if (joinError.code === '23505') {
+      return room as RoomRow;
+    }
+    throw joinError;
+  }
+
+  return room as RoomRow;
+}
+
+// Açık odaları getir (lobby listesi)
+export async function fetchOpenRooms(): Promise<RoomWithPlayerCount[]> {
+  // Bekleyen odaları çek
+  const { data: rooms, error } = await supabase
+    .from('rooms')
+    .select('*')
+    .eq('status', 'waiting')
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  if (!rooms || rooms.length === 0) return [];
+
+  // Her oda için oyuncu sayısı ve host adı çek
+  const roomIds = rooms.map((r) => r.id);
+  const { data: players } = await supabase
+    .from('room_players')
+    .select('room_id, username, player_id')
+    .in('room_id', roomIds);
+
+  return rooms.map((room) => {
+    const roomPlayers = (players || []).filter((p) => p.room_id === room.id);
+    const hostPlayer = roomPlayers.find((p) => p.player_id === room.host_id);
+    return {
+      ...(room as RoomRow),
+      player_count: roomPlayers.length,
+      host_username: hostPlayer?.username || 'Unknown',
+    };
+  });
+}
+
+// Oda bilgisini getir
+export async function fetchRoom(code: string): Promise<RoomRow | null> {
+  const { data, error } = await supabase
+    .from('rooms')
+    .select('*')
+    .eq('code', code.toUpperCase())
+    .single();
+
+  if (error) return null;
+  return data as RoomRow;
+}
+
+// Oda oyuncularını getir
+export async function fetchRoomPlayers(roomId: string): Promise<RoomPlayerRow[]> {
+  const { data, error } = await supabase
+    .from('room_players')
+    .select('*')
+    .eq('room_id', roomId)
+    .order('joined_at', { ascending: true });
+
+  if (error) throw error;
+  return (data || []) as RoomPlayerRow[];
+}
+
+// Odadan ayrıl
+export async function leaveRoom(roomId: string, playerId: string, hostId: string): Promise<void> {
+  // Oyuncuyu sil
+  const { error } = await supabase
+    .from('room_players')
+    .delete()
+    .eq('room_id', roomId)
+    .eq('player_id', playerId);
+
+  if (error) throw error;
+
+  // Host ayrılıyorsa odayı sil
+  if (playerId === hostId) {
+    await supabase.from('rooms').delete().eq('id', roomId);
+  }
+}
+
+// Ready durumunu değiştir
+export async function toggleReady(roomId: string, playerId: string, isReady: boolean): Promise<void> {
+  const { error } = await supabase
+    .from('room_players')
+    .update({ is_ready: isReady })
+    .eq('room_id', roomId)
+    .eq('player_id', playerId);
+
+  if (error) throw error;
+}

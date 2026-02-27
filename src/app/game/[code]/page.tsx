@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import Dice from '@/components/ui/Dice';
+import Badge from '@/components/ui/Badge';
 import { useToast } from '@/components/ui/Toast';
 import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { useGameState } from '@/hooks/useGameState';
@@ -25,6 +26,8 @@ export default function GamePage() {
     gameLog,
     revealedDice,
     roundResult,
+    turnTimeLeft,
+    rankings,
     loading,
     makeBid,
     callLiar,
@@ -45,6 +48,12 @@ export default function GamePage() {
   const totalDice = useMemo(() => {
     if (!gameState) return 0;
     return gameState.players.reduce((sum, p) => sum + p.diceCount, 0);
+  }, [gameState]);
+
+  // Hayatta kalan oyuncu sayısı
+  const alivePlayers = useMemo(() => {
+    if (!gameState) return 0;
+    return gameState.players.filter((p) => !p.isEliminated).length;
   }, [gameState]);
 
   // Sırası olan oyuncunun adı
@@ -89,6 +98,14 @@ export default function GamePage() {
     return revealedDice.find((r) => r.id === playerId)?.dice || null;
   }
 
+  // Timer rengi (son 5sn kırmızı)
+  function getTimerColor(): string {
+    if (turnTimeLeft === null) return '';
+    if (turnTimeLeft <= 5) return 'text-pirate-red-light';
+    if (turnTimeLeft <= 10) return 'text-gold-light';
+    return 'text-text-primary';
+  }
+
   function handleMakeBid() {
     if (!canMakeBid) {
       showToast('Invalid bid — quantity or value must increase');
@@ -126,6 +143,8 @@ export default function GamePage() {
 
   // Oyun bitti ekranı
   if (gameState.status === 'finished' && winner) {
+    const isWinner = winner.id === user?.id;
+
     return (
       <main className="min-h-dvh flex flex-col items-center justify-center p-4">
         <div className="w-full max-w-[500px] animate-fade-in text-center">
@@ -134,11 +153,46 @@ export default function GamePage() {
               Game Over!
             </h2>
             <p className="text-2xl font-bold text-text-bright mb-1">
-              {winner.id === user?.id ? 'You Win!' : `${winner.username} Wins!`}
+              {isWinner ? 'You Win!' : `${winner.username} Wins!`}
             </p>
             <p className="text-text-muted text-sm mb-6">
               After {gameState.round} rounds of bluffing
             </p>
+
+            {/* Sıralama tablosu */}
+            {rankings.length > 0 && (
+              <div className="mb-6">
+                <h4 className="text-text-muted text-xs uppercase tracking-wider mb-3">Final Standings</h4>
+                <div className="flex flex-col gap-1.5">
+                  {rankings.map((r) => (
+                    <div
+                      key={r.id}
+                      className={`flex items-center justify-between px-3 py-2 rounded-lg ${
+                        r.rank === 1
+                          ? 'bg-gold/10 border border-border-gold'
+                          : 'bg-pirate-bg-medium border border-border-pirate'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`font-bold text-sm min-w-[24px] ${
+                          r.rank === 1 ? 'text-gold-light' :
+                          r.rank === 2 ? 'text-text-primary' :
+                          'text-text-muted'
+                        }`}>
+                          #{r.rank}
+                        </span>
+                        <span className={`text-sm ${r.id === user?.id ? 'font-semibold text-text-bright' : 'text-text-primary'}`}>
+                          {r.username}
+                          {r.id === user?.id && <span className="text-text-muted text-xs ml-1">(you)</span>}
+                        </span>
+                      </div>
+                      {r.rank === 1 && <Badge variant="gold">Winner</Badge>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <Button onClick={() => router.push('/lobby')}>
               Back to Lobby
             </Button>
@@ -168,7 +222,6 @@ export default function GamePage() {
 
   // Ana oyun ekranı
   const isRevealing = gameState.status === 'revealing' || revealedDice !== null;
-  const isRoundEnd = gameState.status === 'round_end' || roundResult !== null;
   const myPlayer = gameState.players.find((p) => p.id === user?.id);
   const amEliminated = myPlayer?.isEliminated ?? false;
 
@@ -176,26 +229,45 @@ export default function GamePage() {
     <main className="min-h-dvh flex flex-col items-center p-2 pt-2">
       <div className="w-full max-w-[600px] flex flex-col gap-2 animate-fade-in">
         {/* Oyun bilgi bar */}
-        <Card className="flex justify-between items-center py-2 px-3 text-xs">
-          <div>
-            <span className="text-text-muted">Round </span>
-            <strong className="text-gold-light">{gameState.round}</strong>
+        <Card className="py-2 px-3">
+          <div className="flex justify-between items-center text-xs">
+            <div>
+              <span className="text-text-muted">Round </span>
+              <strong className="text-gold-light">{gameState.round}</strong>
+            </div>
+            <div>
+              <span className="text-text-muted">Players </span>
+              <strong className="text-gold-light">{alivePlayers}/{gameState.players.length}</strong>
+            </div>
+            <div>
+              <span className="text-text-muted">Dice </span>
+              <strong className="text-gold-light">{totalDice}</strong>
+            </div>
+            {/* Turn Timer */}
+            {turnTimeLeft !== null && (
+              <div>
+                <strong className={`text-lg font-bold ${getTimerColor()}`}>
+                  {turnTimeLeft}s
+                </strong>
+              </div>
+            )}
           </div>
-          <div>
-            <span className="text-text-muted">Last Bid: </span>
-            <strong className="text-gold-light">
-              {lastBidInfo ? `${lastBidInfo.quantity}x ${lastBidInfo.value}'s` : '—'}
-            </strong>
-          </div>
-          <div>
-            <span className="text-text-muted">Turn: </span>
-            <strong className={`${isMyTurn ? 'text-pirate-green-light' : 'text-gold-light'}`}>
+          {/* Sıra bilgisi */}
+          <div className="flex items-center justify-center gap-2 mt-1 pt-1 border-t border-border-pirate/50">
+            <span className="text-text-muted text-xs">Turn:</span>
+            <strong className={`text-sm ${isMyTurn ? 'text-pirate-green-light' : 'text-gold-light'}`}>
               {currentTurnName}
             </strong>
-          </div>
-          <div>
-            <span className="text-text-muted">Dice: </span>
-            <strong className="text-gold-light">{totalDice}</strong>
+            {lastBidInfo && (
+              <>
+                <span className="text-border-pirate mx-1">|</span>
+                <span className="text-text-muted text-xs">Last Bid:</span>
+                <strong className="text-text-bright text-sm">
+                  {lastBidInfo.quantity}x {lastBidInfo.value}&apos;s
+                </strong>
+                <span className="text-text-muted text-xs">by {lastBidInfo.username}</span>
+              </>
+            )}
           </div>
         </Card>
 
@@ -223,17 +295,20 @@ export default function GamePage() {
                   isLoser ? 'border-pirate-red shadow-[0_0_20px_rgba(192,57,43,0.2)]' : ''
                 }`}
               >
-                <p className="font-semibold text-text-primary text-sm truncate">{opp.username}</p>
+                <div className="flex items-center justify-center gap-1">
+                  <p className="font-semibold text-text-primary text-sm truncate">{opp.username}</p>
+                  {opp.isDisconnected && (
+                    <span className="text-pirate-red-light text-[10px]" title="Disconnected">DC</span>
+                  )}
+                </div>
                 <div className="flex justify-center gap-1 mt-1 flex-wrap">
                   {opp.isEliminated ? (
                     <span className="text-pirate-red-light text-xs">Eliminated</span>
                   ) : oppRevealed ? (
-                    // Zarlar açık — gerçek değerleri göster
                     oppRevealed.map((val, i) => (
                       <Dice key={i} value={val} small />
                     ))
                   ) : (
-                    // Zarlar gizli
                     Array.from({ length: opp.diceCount }).map((_, i) => (
                       <Dice key={i} hidden small />
                     ))
@@ -259,18 +334,6 @@ export default function GamePage() {
             )}
           </div>
         </Card>
-
-        {/* Son teklif */}
-        {lastBidInfo && (
-          <div className="bg-pirate-bg-medium border border-border-pirate rounded-[10px] p-3 text-center">
-            <span className="text-text-muted text-sm">Last bid by </span>
-            <strong className="text-gold-light">{lastBidInfo.username}</strong>
-            <span className="text-text-muted text-sm">: </span>
-            <strong className="text-text-bright text-lg">{lastBidInfo.quantity}x</strong>
-            <span className="text-text-muted text-sm"> of </span>
-            <strong className="text-text-bright text-lg">{lastBidInfo.value}&apos;s</strong>
-          </div>
-        )}
 
         {/* Teklif paneli — sadece sıra bendeyse ve oyun aktifse */}
         {isMyTurn && gameState.status === 'active' && !amEliminated && (
@@ -334,6 +397,9 @@ export default function GamePage() {
         {!isMyTurn && gameState.status === 'active' && !amEliminated && (
           <div className="text-center py-3 text-text-muted text-sm">
             Waiting for <strong className="text-gold-light">{currentTurnName}</strong> to make a move...
+            {turnTimeLeft !== null && (
+              <span className={`ml-2 font-bold ${getTimerColor()}`}>{turnTimeLeft}s</span>
+            )}
           </div>
         )}
 
@@ -358,7 +424,8 @@ export default function GamePage() {
                     entry.type === 'elimination' ? 'text-pirate-red-light' :
                     entry.type === 'liar' ? 'text-pirate-red-light font-semibold' :
                     entry.type === 'system' ? 'text-gold-light' :
-                    entry.type === 'round' ? 'text-pirate-blue' : ''
+                    entry.type === 'round' ? 'text-pirate-blue' :
+                    entry.type === 'timer' ? 'text-gold italic' : ''
                   }`}
                 >
                   {entry.message}

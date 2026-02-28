@@ -35,6 +35,7 @@ export interface Bid {
   playerId: string;
   quantity: number;
   value: number; // 1-6
+  skipTo?: string; // Disconnect sonrası turn skip için
 }
 
 export interface GamePlayer {
@@ -44,6 +45,7 @@ export interface GamePlayer {
   dice: number[]; // Sadece kendi zarlarımız görünür
   isEliminated: boolean;
   isDisconnected: boolean;
+  isBot?: boolean;
 }
 
 export interface GameState {
@@ -79,4 +81,5 @@ export type RealtimeEvent =
   | { type: 'player:eliminated'; payload: { playerId: string } }
   | { type: 'player:disconnected'; payload: { playerId: string } }
   | { type: 'turn:timeout'; payload: { playerId: string } }
-  | { type: 'chat:message'; payload: ChatMessage };
+  | { type: 'chat:message'; payload: ChatMessage }
+  | { type: 'player:kicked'; payload: { playerId: string; reason: string } };

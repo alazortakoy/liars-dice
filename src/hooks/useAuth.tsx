@@ -58,30 +58,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Oturum değişikliklerini dinle
+  // Auth state değişikliklerini dinle
+  // Supabase resmi önerisi: önce onAuthStateChange kur, sonra getSession çağır
+  // Bu sıralama lock çatışmasını (AbortError) önler
   useEffect(() => {
-    // Mevcut oturumu kontrol et
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        const authUser = await toAuthUser(session.user);
-        setUser(authUser);
-      }
-      setLoading(false);
-    });
+    let mounted = true;
 
-    // Auth state değişikliklerini dinle
+    // 1. Önce subscription kur — INITIAL_SESSION dahil tüm event'leri yakala
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        if (event === 'SIGNED_IN' && session?.user) {
+        if (!mounted) return;
+
+        if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') && session?.user) {
           const authUser = await toAuthUser(session.user);
-          setUser(authUser);
+          if (mounted) {
+            setUser(authUser);
+            setLoading(false);
+          }
         } else if (event === 'SIGNED_OUT') {
-          setUser(null);
+          if (mounted) {
+            setUser(null);
+            setLoading(false);
+          }
         }
       }
     );
 
-    return () => subscription.unsubscribe();
+    // 2. Sonra mevcut session'ı kontrol et (INITIAL_SESSION event'i tetiklenmezse fallback)
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!mounted) return;
+      if (!session) {
+        setLoading(false);
+      }
+      // session varsa INITIAL_SESSION veya SIGNED_IN event'i zaten user'ı set edecek
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signInAnonymously = useCallback(async () => {

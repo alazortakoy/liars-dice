@@ -1,14 +1,15 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import Badge from '@/components/ui/Badge';
 import { useToast } from '@/components/ui/Toast';
 import { useRequireAuth } from '@/hooks/useRequireAuth';
-import { fetchRoom, fetchRoomPlayers, leaveRoom, toggleReady, startGame, type RoomRow, type RoomPlayerRow } from '@/lib/room-service';
+import { fetchRoom, fetchRoomPlayers, leaveRoom, toggleReady, startGame, addBot, removeBot, kickPlayer, type RoomRow, type RoomPlayerRow } from '@/lib/room-service';
 import { supabase } from '@/lib/supabase';
+import { generateBotId, getAvailableBotName } from '@/lib/bot-engine';
 import type { RoomSettings } from '@/types';
 
 export default function RoomPage() {
@@ -21,6 +22,8 @@ export default function RoomPage() {
   const [room, setRoom] = useState<RoomRow | null>(null);
   const [players, setPlayers] = useState<RoomPlayerRow[]>([]);
   const [roomLoading, setRoomLoading] = useState(true);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Oda ve oyuncu verilerini yükle
   const loadRoomData = useCallback(async () => {
@@ -43,6 +46,49 @@ export default function RoomPage() {
     }
   }, [authReady, loadRoomData]);
 
+  // Otomatik başlama: tüm oyuncular ready olunca 3sn geri sayım
+  const allReadyForStart = players.length >= 2 && players.every((p) => p.is_ready);
+  const isHost = room?.host_id === user?.id;
+
+  useEffect(() => {
+    if (allReadyForStart && isHost) {
+      // 3sn geri sayım başlat
+      setCountdown(3);
+      let remaining = 3;
+      countdownTimerRef.current = setInterval(() => {
+        remaining -= 1;
+        setCountdown(remaining);
+        if (remaining <= 0) {
+          if (countdownTimerRef.current) {
+            clearInterval(countdownTimerRef.current);
+            countdownTimerRef.current = null;
+          }
+          // Otomatik oyun başlat
+          if (room) {
+            startGame(room.id, user!.id).catch((err: unknown) => {
+              const msg = err instanceof Error ? err.message : 'Failed to start game';
+              showToast(msg);
+            });
+          }
+        }
+      }, 1000);
+    } else {
+      // Ready değilse countdown iptal
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+      }
+      setCountdown(null);
+    }
+
+    return () => {
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
+      }
+    };
+  }, [allReadyForStart, isHost, room, user, showToast]);
+
   // Realtime: room_players değişikliklerini dinle
   useEffect(() => {
     if (!room) return;
@@ -54,7 +100,14 @@ export default function RoomPage() {
         { event: '*', schema: 'public', table: 'room_players', filter: `room_id=eq.${room.id}` },
         () => {
           // Oyuncu listesini yenile
-          fetchRoomPlayers(room.id).then(setPlayers);
+          fetchRoomPlayers(room.id).then((updatedPlayers) => {
+            setPlayers(updatedPlayers);
+            // Kick detection: ben artık listede yoksam lobby'ye yönlendir
+            if (user && !updatedPlayers.some((p) => p.player_id === user.id)) {
+              showToast('You were removed from the room');
+              router.push('/lobby');
+            }
+          });
         }
       )
       .on(
@@ -118,10 +171,48 @@ export default function RoomPage() {
     if (!room || !user) return;
     try {
       await startGame(room.id, user.id);
-      // Realtime UPDATE event ile tüm oyuncular yönlendirilecek
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Failed to start game';
       showToast(msg);
+    }
+  }
+
+  // Bot ekle (sadece host)
+  async function handleAddBot() {
+    if (!room || !user) return;
+    const maxP = (room.settings as RoomSettings).maxPlayers || 6;
+    if (players.length >= maxP) {
+      showToast('Room is full');
+      return;
+    }
+    try {
+      const usedNames = players.map((p) => p.username);
+      const botName = getAvailableBotName(usedNames);
+      const botId = generateBotId();
+      await addBot(room.id, botId, botName);
+    } catch {
+      showToast('Failed to add bot');
+    }
+  }
+
+  // Bot çıkar
+  async function handleRemoveBot(botPlayerId: string) {
+    if (!room) return;
+    try {
+      await removeBot(room.id, botPlayerId);
+    } catch {
+      showToast('Failed to remove bot');
+    }
+  }
+
+  // Oyuncu kick et (sadece host)
+  async function handleKickPlayer(playerId: string) {
+    if (!room || !user) return;
+    try {
+      await kickPlayer(room.id, playerId);
+      showToast('Player kicked');
+    } catch {
+      showToast('Failed to kick player');
     }
   }
 
@@ -134,10 +225,8 @@ export default function RoomPage() {
   }
 
   const settings = (room?.settings || {}) as RoomSettings;
-  const isHost = room?.host_id === user?.id;
   const myPlayer = players.find((p) => p.player_id === user?.id);
   const isReady = myPlayer?.is_ready ?? false;
-  const allReady = players.length >= 2 && players.every((p) => p.is_ready);
   const emptySlots = Math.max(0, (settings.maxPlayers || 6) - players.length);
 
   return (
@@ -173,13 +262,36 @@ export default function RoomPage() {
               <div className="flex items-center gap-2 font-medium">
                 {player.player_id === room?.host_id && <span className="text-xs">👑</span>}
                 <span>{player.username}</span>
+                {player.is_bot && <Badge variant="gold">BOT</Badge>}
                 {player.player_id === user?.id && (
                   <span className="text-text-muted text-xs">(you)</span>
                 )}
               </div>
-              <Badge variant={player.is_ready ? 'green' : 'red'}>
-                {player.is_ready ? 'Ready' : 'Not Ready'}
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Badge variant={player.is_ready ? 'green' : 'red'}>
+                  {player.is_ready ? 'Ready' : 'Not Ready'}
+                </Badge>
+                {/* Host: kick/remove butonları */}
+                {isHost && player.player_id !== user?.id && (
+                  player.is_bot ? (
+                    <button
+                      onClick={() => handleRemoveBot(player.player_id)}
+                      className="text-pirate-red-light text-xs hover:underline"
+                      title="Remove bot"
+                    >
+                      ✕
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => handleKickPlayer(player.player_id)}
+                      className="text-pirate-red-light text-xs hover:underline"
+                      title="Kick player"
+                    >
+                      Kick
+                    </button>
+                  )
+                )}
+              </div>
             </Card>
           ))}
 
@@ -203,14 +315,27 @@ export default function RoomPage() {
             {isReady ? '✅ Ready!' : '⚔️ Ready Up'}
           </Button>
 
-          {isHost && (
+          {/* Countdown gösterimi */}
+          {countdown !== null && (
+            <div className="text-center py-2 text-gold-light font-bold text-lg animate-fade-in">
+              Game starting in {countdown}...
+            </div>
+          )}
+
+          {isHost && countdown === null && (
             <Button
               fullWidth
               variant="primary"
-              disabled={!allReady}
+              disabled={!allReadyForStart}
               onClick={handleStartGame}
             >
               🏴‍☠️ Start Game
+            </Button>
+          )}
+
+          {isHost && players.length < (settings.maxPlayers || 6) && (
+            <Button fullWidth variant="secondary" onClick={handleAddBot}>
+              🤖 Add Bot
             </Button>
           )}
 

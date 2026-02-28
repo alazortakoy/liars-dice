@@ -20,6 +20,7 @@ export interface RoomPlayerRow {
   player_id: string;
   username: string;
   is_ready: boolean;
+  is_bot: boolean;
   joined_at: string;
 }
 
@@ -259,6 +260,43 @@ export async function toggleReady(roomId: string, playerId: string, isReady: boo
   const { error } = await supabase
     .from('room_players')
     .update({ is_ready: isReady })
+    .eq('room_id', roomId)
+    .eq('player_id', playerId);
+
+  if (error) throw error;
+}
+
+// Bot oyuncu ekle (host only)
+export async function addBot(roomId: string, botId: string, botName: string): Promise<void> {
+  const { error } = await supabase
+    .from('room_players')
+    .insert({
+      room_id: roomId,
+      player_id: botId,
+      username: botName,
+      is_ready: true,
+      is_bot: true,
+    });
+
+  if (error) throw error;
+}
+
+// Bot oyuncu çıkar
+export async function removeBot(roomId: string, botId: string): Promise<void> {
+  const { error } = await supabase
+    .from('room_players')
+    .delete()
+    .eq('room_id', roomId)
+    .eq('player_id', botId);
+
+  if (error) throw error;
+}
+
+// Oyuncuyu kick et (host only)
+export async function kickPlayer(roomId: string, playerId: string): Promise<void> {
+  const { error } = await supabase
+    .from('room_players')
+    .delete()
     .eq('room_id', roomId)
     .eq('player_id', playerId);
 

@@ -29,7 +29,7 @@ export async function createGameState(
   const shuffled = [...roomPlayers].sort(() => Math.random() - 0.5);
   const turnOrder = shuffled.map((p) => p.player_id);
 
-  // GamePlayer dizisi oluştur (dice boş — herkes kendi atar)
+  // GamePlayer dizisi oluştur (dice boş — herkes kendi atar, botlar hariç)
   const players: GamePlayer[] = shuffled.map((p) => ({
     id: p.player_id,
     username: p.username,
@@ -37,6 +37,7 @@ export async function createGameState(
     dice: [], // Herkes kendi zarlarını local atar
     isEliminated: false,
     isDisconnected: false,
+    isBot: p.is_bot || false,
   }));
 
   const { data, error } = await supabase
@@ -86,13 +87,13 @@ export async function updateGameState(
   if (error) throw error;
 }
 
-// Sıradaki oyuncuyu bul (eliminated olanları atla)
+// Sıradaki oyuncuyu bul (eliminated ve disconnected olanları atla)
 export function getNextTurnPlayerId(
   turnOrder: string[],
   currentPlayerId: string,
   players: GamePlayer[]
 ): string {
-  const activePlayers = players.filter((p) => !p.isEliminated);
+  const activePlayers = players.filter((p) => !p.isEliminated && !p.isDisconnected);
   if (activePlayers.length <= 1) return activePlayers[0]?.id || currentPlayerId;
 
   const activeIds = new Set(activePlayers.map((p) => p.id));

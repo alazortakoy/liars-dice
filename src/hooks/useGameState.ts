@@ -13,6 +13,7 @@ import {
 } from '@/lib/game-service';
 import { fetchRoom, fetchRoomPlayers } from '@/lib/room-service';
 import { APP_CONFIG } from '@/lib/config';
+import { decideBotAction, rollBotDice, getBotDelay } from '@/lib/bot-engine';
 
 // Oyun logu kaydı
 export interface GameLogEntry {
@@ -81,6 +82,12 @@ export function useGameState(
 
   // Eleme sırası takibi (oyun sonu sıralama için)
   const eliminationOrderRef = useRef<string[]>([]);
+
+  // Fallback timer (game:start kaçırılırsa DB'den yükle)
+  const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Bot zarları (host tarafında saklanır)
+  const botDiceRef = useRef<Map<string, number[]>>(new Map());
 
   const isMyTurn = gameState?.currentTurnPlayerId === userId;
 
@@ -198,15 +205,47 @@ export function useGameState(
           addLog(`Round ${gs.round} started — ${gs.players.reduce((sum, p) => sum + p.diceCount, 0)} dice on the table`, 'round');
           setLoading(false);
 
+          // Host: bot zarlarını at
+          if (userId === hostIdRef.current) {
+            for (const p of gs.players) {
+              if (p.isBot && !p.isEliminated) {
+                botDiceRef.current.set(p.id, rollBotDice(p.diceCount));
+              }
+            }
+          }
+
           // Turn timer başlat
           if (gs.settings.turnTimer > 0) {
             startTurnTimer(gs.settings.turnTimer);
+          }
+
+          // Host: sıra botta ise bot hamlesini tetikle
+          if (userId === hostIdRef.current) {
+            const currentPlayer = gs.players.find((p) => p.id === gs.currentTurnPlayerId);
+            if (currentPlayer?.isBot && !currentPlayer.isEliminated) {
+              scheduleBotTurn(gs);
+            }
           }
           break;
         }
 
         case 'bid:make': {
           const bid = event.payload;
+
+          // Disconnect sonrası turn skip (host tarafından gönderilir)
+          if (bid.playerId === '__skip__' && bid.skipTo) {
+            const skipTarget = bid.skipTo;
+            setGameState((prev) => {
+              if (!prev) return prev;
+              return { ...prev, currentTurnPlayerId: skipTarget };
+            });
+            // Timer'ı yeniden başlat
+            if (settingsRef.current && settingsRef.current.turnTimer > 0) {
+              startTurnTimer(settingsRef.current.turnTimer);
+            }
+            break;
+          }
+
           setGameState((prev) => {
             if (!prev) return prev;
             const nextTurn = getNextTurnPlayerId(
@@ -224,6 +263,17 @@ export function useGameState(
           if (settingsRef.current && settingsRef.current.turnTimer > 0) {
             startTurnTimer(settingsRef.current.turnTimer);
           }
+
+          // Host: sıra bota geçtiyse bot hamlesini tetikle
+          if (userId === getHostId()) {
+            const updatedGs = gameStateRef.current;
+            if (updatedGs) {
+              const nextPlayer = updatedGs.players.find((p) => p.id === updatedGs.currentTurnPlayerId);
+              if (nextPlayer?.isBot && !nextPlayer.isEliminated) {
+                scheduleBotTurn(updatedGs);
+              }
+            }
+          }
           break;
         }
 
@@ -240,9 +290,27 @@ export function useGameState(
           // Herkes zarlarını paylaşsın — kendi zarlarımı gönder
           if (userId) {
             setTimeout(() => {
+              // Kendi zarlarım + host ise bot zarları
+              const revealPlayers: { id: string; dice: number[] }[] = [
+                { id: userId, dice: myDiceRef.current },
+              ];
+
+              // Host: bot zarlarını da reveal et
+              if (userId === getHostId()) {
+                const currentGs = gameStateRef.current;
+                if (currentGs) {
+                  for (const p of currentGs.players) {
+                    if (p.isBot && !p.isEliminated) {
+                      const botDice = botDiceRef.current.get(p.id) || [];
+                      revealPlayers.push({ id: p.id, dice: botDice });
+                    }
+                  }
+                }
+              }
+
               sendEventRef.current({
                 type: 'dice:reveal',
-                payload: { players: [{ id: userId, dice: myDiceRef.current }] },
+                payload: { players: revealPlayers },
               });
             }, 100);
           }
@@ -415,18 +483,72 @@ export function useGameState(
 
         case 'player:disconnected': {
           const { playerId } = event.payload;
+          const gs = gameStateRef.current;
+          if (!gs) break;
+
+          // Bot oyuncuları disconnect'ten muaf tut
+          const dcPlayer = gs.players.find((p) => p.id === playerId);
+          if (!dcPlayer || dcPlayer.isEliminated) break;
+          if ('isBot' in dcPlayer && dcPlayer.isBot) break;
+
+          const dcName = dcPlayer.username || 'Someone';
+          addLog(`${dcName} disconnected — eliminated!`, 'system');
+
+          // Oyuncuyu disconnected + eliminated olarak işaretle
           setGameState((prev) => {
             if (!prev) return prev;
-            return {
-              ...prev,
-              players: prev.players.map((p) =>
-                p.id === playerId ? { ...p, isDisconnected: true } : p
-              ),
-            };
+            const updatedPlayers = prev.players.map((p) =>
+              p.id === playerId ? { ...p, isDisconnected: true, isEliminated: true } : p
+            );
+
+            // Eleme sırasına ekle
+            eliminationOrderRef.current.push(playerId);
+
+            // Kazanan kontrolü
+            const alive = updatedPlayers.filter((p) => !p.isEliminated);
+            if (alive.length <= 1 && prev.status !== 'finished') {
+              const winnerId = alive[0]?.id || null;
+              if (userId === getHostId()) {
+                setTimeout(() => {
+                  sendEventRef.current({
+                    type: 'game:end',
+                    payload: { winnerId: winnerId || '' },
+                  });
+                }, 2000);
+              }
+              return { ...prev, players: updatedPlayers, status: 'finished', winnerId };
+            }
+
+            // Sırası bu oyuncudaysa, sırayı sonrakine geç
+            if (prev.currentTurnPlayerId === playerId) {
+              const nextTurn = getNextTurnPlayerId(
+                turnOrderRef.current,
+                playerId,
+                updatedPlayers
+              );
+              // Host yeni turu başlatsın
+              if (userId === getHostId()) {
+                sendEventRef.current({
+                  type: 'bid:make',
+                  payload: { playerId: '__skip__', quantity: 0, value: 0, skipTo: nextTurn },
+                });
+              }
+              return { ...prev, players: updatedPlayers, currentTurnPlayerId: nextTurn };
+            }
+
+            return { ...prev, players: updatedPlayers };
           });
-          const gs = gameStateRef.current;
-          const dcName = gs?.players.find((p) => p.id === playerId)?.username || 'Someone';
-          addLog(`${dcName} disconnected`, 'system');
+
+          // Host: DB'yi güncelle
+          if (userId === getHostId() && roomIdRef.current) {
+            const updatedGs = gameStateRef.current;
+            if (updatedGs) {
+              updateGameState(roomIdRef.current, {
+                players: updatedGs.players,
+                current_turn_player_id: updatedGs.currentTurnPlayerId,
+              });
+            }
+          }
           break;
         }
       }
@@ -441,6 +563,48 @@ export function useGameState(
   // myDice ref (LIAR reveal'da kullanmak için)
   const myDiceRef = useRef(myDice);
   myDiceRef.current = myDice;
+
+  // Bot turn zamanlayıcı (host tarafında çalışır)
+  const botTurnTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const scheduleBotTurn = useCallback((gs: GameState) => {
+    if (botTurnTimerRef.current) {
+      clearTimeout(botTurnTimerRef.current);
+    }
+
+    const botPlayer = gs.players.find((p) => p.id === gs.currentTurnPlayerId);
+    if (!botPlayer || !botPlayer.isBot || botPlayer.isEliminated) return;
+
+    const botDice = botDiceRef.current.get(botPlayer.id) || [];
+    const totalDice = gs.players
+      .filter((p) => !p.isEliminated)
+      .reduce((sum, p) => sum + p.diceCount, 0);
+
+    botTurnTimerRef.current = setTimeout(() => {
+      const decision = decideBotAction(
+        botDice,
+        gs.lastBid,
+        totalDice,
+        gs.settings.jokerRule
+      );
+
+      if (decision.action === 'liar' && gs.lastBid) {
+        sendEventRef.current({
+          type: 'bid:liar',
+          payload: { callerId: botPlayer.id },
+        });
+      } else if (decision.bid) {
+        sendEventRef.current({
+          type: 'bid:make',
+          payload: {
+            playerId: botPlayer.id,
+            quantity: decision.bid.quantity,
+            value: decision.bid.value,
+          },
+        });
+      }
+    }, getBotDelay());
+  }, []);
 
   // Host ID'yi bul
   const hostIdRef = useRef<string>('');
@@ -519,6 +683,44 @@ export function useGameState(
         } else {
           // Host olmayan oyuncular game:start event'ini bekler
           setLoading(true);
+
+          // Fallback: 5sn sonra hâlâ yüklenmediyse DB'den kontrol et
+          // (game:start broadcast'i kaçırılmış olabilir)
+          fallbackTimerRef.current = setTimeout(async () => {
+            if (!gameStateRef.current) {
+              try {
+                const gs = await fetchGameState(room.id);
+                if (gs && gs.status !== 'finished') {
+                  const settings = room.settings as RoomSettings;
+                  const recovered: GameState = {
+                    roomCode,
+                    players: gs.players,
+                    currentTurnPlayerId: gs.current_turn_player_id,
+                    round: gs.round,
+                    lastBid: gs.last_bid,
+                    status: gs.status as GameState['status'],
+                    settings,
+                    winnerId: gs.winner_id,
+                  };
+                  setGameState(recovered);
+                  settingsRef.current = settings;
+                  turnOrderRef.current = gs.turn_order;
+
+                  const me = recovered.players.find((p) => p.id === userId);
+                  if (me && !me.isEliminated) {
+                    setMyDice(rollDice(me.diceCount));
+                  }
+                  if (settings.turnTimer > 0 && recovered.status === 'active') {
+                    startTurnTimer(settings.turnTimer);
+                  }
+                  addLog('Connected to game (fallback)', 'system');
+                  setLoading(false);
+                }
+              } catch {
+                // Sessizce devam et, event'i beklemeye devam
+              }
+            }
+          }, 5000);
         }
       } catch (err) {
         console.error('Failed to init game:', err);
@@ -530,6 +732,12 @@ export function useGameState(
     // Cleanup timer'ları
     return () => {
       clearTurnTimer();
+      if (fallbackTimerRef.current) {
+        clearTimeout(fallbackTimerRef.current);
+      }
+      if (botTurnTimerRef.current) {
+        clearTimeout(botTurnTimerRef.current);
+      }
     };
   }, [roomCode, userId, addLog, startTurnTimer, clearTurnTimer]);
 

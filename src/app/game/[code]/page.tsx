@@ -352,6 +352,9 @@ export default function GamePage() {
               >
                 <div className="flex items-center justify-center gap-1">
                   <p className="font-semibold text-text-primary text-sm truncate">{opp.username}</p>
+                  {opp.isBot && (
+                    <span className="text-pirate-blue text-[10px]" title="Bot">BOT</span>
+                  )}
                   {opp.isDisconnected && (
                     <span className="text-pirate-red-light text-[10px]" title="Disconnected">DC</span>
                   )}

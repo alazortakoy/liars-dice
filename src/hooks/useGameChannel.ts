@@ -85,7 +85,31 @@ export function useGameChannel(
 
     channelRef.current = channel;
 
+    // Tab/tarayıcı kapanınca Presence'dan hemen çık
+    const handleBeforeUnload = () => {
+      if (channelRef.current) {
+        channelRef.current.untrack();
+      }
+    };
+
+    // Sekme arka plana geçince de bildir (mobil tarayıcılar için)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && channelRef.current) {
+        // Arka plana geçti — untrack yapma (sayfa yenileme olabilir)
+        // Sadece visible'a dönünce re-track yap
+      } else if (document.visibilityState === 'visible' && channelRef.current && userId) {
+        // Tekrar görünür oldu — Presence'ı yenile
+        channelRef.current.track({ username: username || 'Unknown' });
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+
       // Tüm disconnect timer'larını temizle
       for (const timer of disconnectTimers.current.values()) {
         clearTimeout(timer);

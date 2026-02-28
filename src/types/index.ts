@@ -3,7 +3,6 @@
 export interface Player {
   id: string;
   username: string;
-  isAnonymous: boolean;
 }
 
 export interface RoomSettings {

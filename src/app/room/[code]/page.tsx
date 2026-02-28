@@ -10,6 +10,7 @@ import { useRequireAuth } from '@/hooks/useRequireAuth';
 import { fetchRoom, fetchRoomPlayers, leaveRoom, toggleReady, startGame, addBot, removeBot, kickPlayer, type RoomRow, type RoomPlayerRow } from '@/lib/room-service';
 import { supabase } from '@/lib/supabase';
 import { generateBotId, getAvailableBotName } from '@/lib/bot-engine';
+import { useRoomPresence } from '@/hooks/useRoomPresence';
 import type { RoomSettings } from '@/types';
 
 export default function RoomPage() {
@@ -24,6 +25,9 @@ export default function RoomPage() {
   const [roomLoading, setRoomLoading] = useState(true);
   const [countdown, setCountdown] = useState<number | null>(null);
   const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Bekleme odası Presence — tarayıcı kapanınca 30sn timeout → oyuncuyu sil
+  useRoomPresence(room?.id, user?.id, user?.username ?? undefined, room?.host_id);
 
   // Oda ve oyuncu verilerini yükle
   const loadRoomData = useCallback(async () => {
@@ -209,7 +213,7 @@ export default function RoomPage() {
   async function handleKickPlayer(playerId: string) {
     if (!room || !user) return;
     try {
-      await kickPlayer(room.id, playerId);
+      await kickPlayer(room.id, playerId, user.id);
       showToast('Player kicked');
     } catch {
       showToast('Failed to kick player');

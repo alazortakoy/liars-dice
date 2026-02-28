@@ -47,7 +47,7 @@ src/
 - Mobile-first tasarım (320px'den itibaren)
 - Korsan teması (koyu renkler, altın vurgular)
 - 2-8 oyuncu/oda
-- Anonim + Google giriş
+- Email + password giriş (anonim kaldırıldı)
 - Host tam kontrol (joker, zar sayısı, süre)
 - Bağlantı kopma: 30sn bekle → ele
 - Client-side zar atma (MVP)

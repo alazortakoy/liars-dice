@@ -122,3 +122,51 @@
 ### Sonraki Adım
 - Faz 8: Ses efektleri + görsel polish
 - Test senaryolarını uygula (2 tarayıcı + bot)
+
+## Oturum 4 — 2026-02-28
+### Yapılanlar — Kritik Bug Fix + Auth Değişikliği
+
+#### Auth Değişikliği
+- **Guest/anonim giriş kaldırıldı**: Sadece email + password ile sign up / sign in
+  - `page.tsx`: Guest buton kaldırıldı, email formu varsayılan gösterim
+  - `useAuth.tsx`: `signInAnonymously` fonksiyonu ve `isAnonymous` alanı kaldırıldı
+  - `types/index.ts`: `Player.isAnonymous` alanı kaldırıldı
+  - `CLAUDE.md`: "Anonim + Google giriş" → "Email + password giriş" güncellendi
+
+#### Bug Fix'ler
+- **leaveRoom boş oda silme**: Non-host son oyuncu ayrılınca oda silinmiyordu
+  - `room-service.ts`: Boş oda kontrolü artık tüm ayrılmalarda yapılıyor (sadece host değil)
+- **Bekleme odasında Presence eklendi**: Tarayıcı kapanınca oyuncu düşmüyordu
+  - `useRoomPresence.ts` (yeni hook): Bekleme odasında Presence takibi
+  - 30sn timeout → `leaveRoom()` çağrısı → oyuncu odadan silinir
+  - F5 yapılırsa 30sn içinde rejoin → timeout iptal
+  - `room/[code]/page.tsx`: `useRoomPresence` hook'u entegre edildi
+- **Host kopma — host devri**: Oyun sırasında host koparsa oyun duruyordu
+  - `useGameState.ts`: Host disconnect algılandığında ilk uygun oyuncuya host devri
+  - Yeni host DB'de `rooms.host_id` günceller
+  - Timer, bot, round yönetimi yeni host'a geçer
+- **kickPlayer host doğrulaması**: Service level'da host kontrolü yoktu
+  - `room-service.ts`: `kickPlayer()` artık `hostId` parametresi alıp DB'den doğrulama yapıyor
+
+#### Supabase Temizlik
+- `supabase-sql/06-cleanup-all-data.sql`: Tüm tabloları temizleyen SQL hazırlandı
+
+#### Bağlantı Yönetimi Case'leri
+- [x] Leave room tıklama → odadan çıkar, lobby'ye döner
+- [x] Tarayıcı kapatma (room) → 30sn timeout → odadan silinir
+- [x] F5 (room) → 30sn rejoin → hiçbir şey olmaz
+- [x] Tarayıcı kapatma (game) → 30sn → oyuncudan elenme
+- [x] F5 (game) → DB'den recovery
+- [x] Host kopma (game) → host devri + oyun devam
+- [x] Son oyuncu ayrılma → oda silinir
+- [x] Sırası gelen kopuk → sıra atlanır
+
+- Build başarılı (0 hata)
+
+### Supabase'de Yapılması Gereken
+- `supabase-sql/06-cleanup-all-data.sql` dosyasını Supabase SQL Editor'da çalıştır
+- Auth → Users'dan tüm kullanıcıları sil (temiz başlangıç)
+
+### Sonraki Adım
+- Vercel deploy + mobil test
+- Faz 8: Ses efektleri + görsel polish

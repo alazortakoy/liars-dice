@@ -12,6 +12,7 @@ import {
   updateRoomStatus,
 } from '@/lib/game-service';
 import { fetchRoom, fetchRoomPlayers } from '@/lib/room-service';
+import { supabase } from '@/lib/supabase';
 import { APP_CONFIG } from '@/lib/config';
 import { decideBotAction, rollBotDice, getBotDelay } from '@/lib/bot-engine';
 
@@ -492,6 +493,24 @@ export function useGameState(
           if ('isBot' in dcPlayer && dcPlayer.isBot) break;
 
           const dcName = dcPlayer.username || 'Someone';
+
+          // Host koptu mu? → host devrini yap
+          if (playerId === hostIdRef.current) {
+            const candidates = gs.players.filter(
+              (p) => !p.isEliminated && !p.isDisconnected && !p.isBot && p.id !== playerId
+            );
+            if (candidates.length > 0) {
+              const newHostId = candidates[0].id;
+              hostIdRef.current = newHostId;
+              addLog(`Host disconnected — ${candidates[0].username} is now host`, 'system');
+
+              // Yeni host DB'de günceller
+              if (userId === newHostId && roomIdRef.current) {
+                supabase.from('rooms').update({ host_id: newHostId }).eq('id', roomIdRef.current);
+              }
+            }
+          }
+
           addLog(`${dcName} disconnected — eliminated!`, 'system');
 
           // Oyuncuyu disconnected + eliminated olarak işaretle
@@ -508,7 +527,7 @@ export function useGameState(
             const alive = updatedPlayers.filter((p) => !p.isEliminated);
             if (alive.length <= 1 && prev.status !== 'finished') {
               const winnerId = alive[0]?.id || null;
-              if (userId === getHostId()) {
+              if (userId === hostIdRef.current) {
                 setTimeout(() => {
                   sendEventRef.current({
                     type: 'game:end',
@@ -526,8 +545,7 @@ export function useGameState(
                 playerId,
                 updatedPlayers
               );
-              // Host yeni turu başlatsın
-              if (userId === getHostId()) {
+              if (userId === hostIdRef.current) {
                 sendEventRef.current({
                   type: 'bid:make',
                   payload: { playerId: '__skip__', quantity: 0, value: 0, skipTo: nextTurn },
@@ -540,7 +558,7 @@ export function useGameState(
           });
 
           // Host: DB'yi güncelle
-          if (userId === getHostId() && roomIdRef.current) {
+          if (userId === hostIdRef.current && roomIdRef.current) {
             const updatedGs = gameStateRef.current;
             if (updatedGs) {
               updateGameState(roomIdRef.current, {

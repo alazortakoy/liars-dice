@@ -198,25 +198,22 @@ export async function leaveRoom(roomId: string, playerId: string, hostId: string
 
   if (error) throw error;
 
-  // Host ayrılıyorsa: başka oyuncu varsa devret, yoksa odayı sil
-  if (playerId === hostId) {
-    const { data: remaining } = await supabase
-      .from('room_players')
-      .select('player_id')
-      .eq('room_id', roomId)
-      .order('joined_at', { ascending: true })
-      .limit(1);
+  // Kalan oyuncuları kontrol et
+  const { data: remaining } = await supabase
+    .from('room_players')
+    .select('player_id')
+    .eq('room_id', roomId)
+    .order('joined_at', { ascending: true });
 
-    if (remaining && remaining.length > 0) {
-      // Host'u sıradaki oyuncuya devret
-      await supabase
-        .from('rooms')
-        .update({ host_id: remaining[0].player_id })
-        .eq('id', roomId);
-    } else {
-      // Kimse kalmadı, odayı sil
-      await supabase.from('rooms').delete().eq('id', roomId);
-    }
+  if (!remaining || remaining.length === 0) {
+    // Kimse kalmadı — odayı sil
+    await supabase.from('rooms').delete().eq('id', roomId);
+  } else if (playerId === hostId) {
+    // Host ayrıldı ama başka oyuncular var — host'u devret
+    await supabase
+      .from('rooms')
+      .update({ host_id: remaining[0].player_id })
+      .eq('id', roomId);
   }
 }
 
@@ -293,7 +290,18 @@ export async function removeBot(roomId: string, botId: string): Promise<void> {
 }
 
 // Oyuncuyu kick et (host only)
-export async function kickPlayer(roomId: string, playerId: string): Promise<void> {
+export async function kickPlayer(roomId: string, playerId: string, hostId: string): Promise<void> {
+  // Host doğrulaması
+  const { data: room } = await supabase
+    .from('rooms')
+    .select('host_id')
+    .eq('id', roomId)
+    .single();
+
+  if (!room || room.host_id !== hostId) {
+    throw new Error('Only the host can kick players');
+  }
+
   const { error } = await supabase
     .from('room_players')
     .delete()

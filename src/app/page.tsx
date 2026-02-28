@@ -11,14 +11,12 @@ import { useAuth } from '@/hooks/useAuth';
 export default function LoginPage() {
   const router = useRouter();
   const { showToast } = useToast();
-  const { user, loading: authLoading, signInAnonymously, signInWithEmail, signUpWithEmail, setUsername: saveUsername } = useAuth();
-  const [guestLoading, setGuestLoading] = useState(false);
+  const { user, loading: authLoading, signInWithEmail, signUpWithEmail, setUsername: saveUsername } = useAuth();
   const [showUsernameModal, setShowUsernameModal] = useState(false);
   const [username, setUsername] = useState('');
   const [usernameLoading, setUsernameLoading] = useState(false);
 
   // Email login state
-  const [showEmailForm, setShowEmailForm] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -34,17 +32,6 @@ export default function LoginPage() {
       setShowUsernameModal(true);
     }
   }, [user, authLoading, router]);
-
-  async function handleGuestLogin() {
-    setGuestLoading(true);
-    try {
-      await signInAnonymously();
-    } catch {
-      showToast('Login failed. Please try again.');
-    } finally {
-      setGuestLoading(false);
-    }
-  }
 
   async function handleEmailSubmit() {
     if (!email || !password) {
@@ -123,58 +110,31 @@ export default function LoginPage() {
           &ldquo;Dead Man&apos;s Chest&rdquo;
         </p>
 
-        <div className="flex flex-col gap-4">
-          {/* Guest giriş */}
-          <Button
-            fullWidth
-            onClick={handleGuestLogin}
-            loading={guestLoading}
-          >
-            ⚓ Play as Guest
+        {/* Email login/signup formu — her zaman görünür */}
+        <div className="flex flex-col gap-3">
+          <Input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            autoFocus
+          />
+          <Input
+            type="password"
+            placeholder="Password (min 6 chars)"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleEmailSubmit()}
+          />
+          <Button fullWidth onClick={handleEmailSubmit} loading={emailLoading}>
+            {isSignUp ? '⚓ Create Account' : '⚓ Log In'}
           </Button>
-
-          <div className="flex items-center gap-4 text-text-muted text-xs">
-            <span className="flex-1 h-px bg-border-pirate" />
-            or
-            <span className="flex-1 h-px bg-border-pirate" />
-          </div>
-
-          {/* Email login/signup */}
-          {!showEmailForm ? (
-            <Button
-              variant="secondary"
-              fullWidth
-              onClick={() => setShowEmailForm(true)}
-            >
-              ✉️ Sign in with Email
-            </Button>
-          ) : (
-            <div className="flex flex-col gap-3 animate-fade-in">
-              <Input
-                type="email"
-                placeholder="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoFocus
-              />
-              <Input
-                type="password"
-                placeholder="Password (min 6 chars)"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleEmailSubmit()}
-              />
-              <Button fullWidth onClick={handleEmailSubmit} loading={emailLoading}>
-                {isSignUp ? 'Create Account' : 'Log In'}
-              </Button>
-              <button
-                onClick={() => setIsSignUp(!isSignUp)}
-                className="text-text-muted text-xs hover:text-gold transition-colors"
-              >
-                {isSignUp ? 'Already have an account? Log in' : "Don't have an account? Sign up"}
-              </button>
-            </div>
-          )}
+          <button
+            onClick={() => setIsSignUp(!isSignUp)}
+            className="text-text-muted text-xs hover:text-gold transition-colors"
+          >
+            {isSignUp ? 'Already have an account? Log in' : "Don't have an account? Sign up"}
+          </button>
         </div>
 
         <p className="text-text-muted text-xs mt-8">

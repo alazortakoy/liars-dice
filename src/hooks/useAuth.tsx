@@ -7,13 +7,11 @@ import type { User } from '@supabase/supabase-js';
 interface AuthUser {
   id: string;
   username: string | null;
-  isAnonymous: boolean;
 }
 
 interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
-  signInAnonymously: () => Promise<void>;
   signInWithEmail: (email: string, password: string) => Promise<void>;
   signUpWithEmail: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -23,7 +21,6 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
-  signInAnonymously: async () => {},
   signInWithEmail: async () => {},
   signUpWithEmail: async () => {},
   signOut: async () => {},
@@ -50,7 +47,6 @@ async function toAuthUser(user: User): Promise<AuthUser> {
   return {
     id: user.id,
     username,
-    isAnonymous: user.is_anonymous ?? false,
   };
 }
 
@@ -99,11 +95,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const signInAnonymously = useCallback(async () => {
-    const { error } = await supabase.auth.signInAnonymously();
-    if (error) throw error;
-  }, []);
-
   const signInWithEmail = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
@@ -137,7 +128,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         loading,
-        signInAnonymously,
         signInWithEmail,
         signUpWithEmail,
         signOut: handleSignOut,

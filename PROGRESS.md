@@ -75,3 +75,50 @@
 
 ### Sonraki Adım
 - Faz 8: Ses efektleri + görsel polish
+
+## Oturum 3 — 2026-02-28
+### Yapılanlar — Bug Fix + Yeni Özellikler
+
+#### Bug Fix'ler
+- **AbortError çözümü**: Supabase GoTrueClient `navigator.locks` çatışması düzeltildi
+  - `supabase.ts`: No-op lock fonksiyonu ile lock mekanizması devre dışı bırakıldı
+  - `useAuth.tsx`: `onAuthStateChange` → `getSession` sıralaması düzeltildi (Supabase resmi önerisi)
+  - `INITIAL_SESSION` + `TOKEN_REFRESHED` event'leri eklendi
+- **Bağlantı kopma mekanizması iyileştirildi**
+  - `useGameChannel.ts`: `beforeunload` handler eklendi — tab kapanınca Presence'dan hemen çıkış
+  - `visibilitychange` handler — mobil arka plan/ön plan geçişlerinde re-track
+  - `useGameState.ts`: Disconnect olan oyuncu artık otomatik eleniyor (`isEliminated: true`)
+  - Sırası disconnect olan oyuncudaysa, sıra sonraki oyuncuya atlanıyor
+  - `game-service.ts`: `getNextTurnPlayerId` artık `isDisconnected` oyuncuları da atlıyor
+- **Oyun başlama race condition düzeltildi**
+  - Non-host oyuncular için 5sn fallback polling (game:start event kaçırılırsa DB'den recovery)
+  - `room/[code]/page.tsx`: Tüm oyuncular ready olunca 3sn geri sayım + otomatik başlama
+  - Host manuel "Start Game" butonu da korundu (erken başlatma için)
+- **Guest auth iyileştirildi**: `INITIAL_SESSION` event ile session recovery düzeltildi
+
+#### Yeni Özellikler
+- **Bot Oyuncular** (`bot-engine.ts` — yeni dosya)
+  - Korsan temalı bot isimleri (Captain Hook, Blackbeard, Anne Bonny, vb.)
+  - Olasılık tabanlı karar motoru: bid vs LIAR kararı
+  - Host tarafında çalışan bot zarları ve hamleleri
+  - 2-4sn delay ile gerçekçi hamle süresi
+  - Bekleme odasında "Add Bot" / "Remove" butonları (host only)
+  - Bot'lar otomatik ready, Presence/disconnect'ten muaf
+  - `room_players` tablosuna `is_bot` kolonu (SQL migration)
+- **Host Kick**
+  - Her oyuncu kartında kick butonu (sadece host görür)
+  - Bot'lar için "✕" remove butonu, oyuncular için "Kick" butonu
+  - Kick detection: room_players'dan silinen oyuncu lobby'ye yönlendiriliyor
+  - `room-service.ts`: `kickPlayer`, `addBot`, `removeBot` fonksiyonları
+- **Tip güncellemeleri**
+  - `GamePlayer.isBot` optional field
+  - `Bid.skipTo` optional field (disconnect turn skip)
+  - `player:kicked` RealtimeEvent tipi
+- Build başarılı (0 hata)
+
+### Supabase'de Yapılması Gereken
+- `supabase-sql/05-bot-column.sql` dosyasını Supabase SQL Editor'da çalıştır
+
+### Sonraki Adım
+- Faz 8: Ses efektleri + görsel polish
+- Test senaryolarını uygula (2 tarayıcı + bot)
